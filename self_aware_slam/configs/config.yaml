@@ -1,0 +1,81 @@
+# Self-Aware SLAM Configuration
+
+# Paths
+paths:
+  slam_metrics_dir: "slam_metrics_dataset/"
+  results_dir: "results/"
+  model_save_dir: "results/models/"
+
+# EuRoC real-data paths (used by scripts/process_euroc_results.py)
+euroc:
+  dataset_dir: ""      # e.g. /data/euroc (extracted ASL format)
+  vins_output_dir: ""   # e.g. /data/vins_output (VINS trajectory files)
+  bag_dir: ""           # e.g. /data/euroc_bags (raw .bag files)
+
+# Dataset
+dataset:
+  euroc_sequences:
+    - "MH_01"
+    - "MH_02"
+    - "MH_03"
+    - "MH_04"
+    - "MH_05"
+  train_split: 0.70
+  val_split: 0.15
+  test_split: 0.15
+
+# Features extracted from SLAM internals
+features:
+  names:
+    - "feature_count"
+    - "feature_tracking_ratio"
+    - "reprojection_error_mean"
+    - "reprojection_error_std"
+    - "imu_residual_norm"
+    - "camera_motion_magnitude"
+    - "tracking_length"
+  normalize: true  # z-score normalization
+
+# Temporal window
+temporal:
+  window_size: 10  # frames
+
+# Failure definition
+failure:
+  pose_error_threshold: 0.3  # meters
+  tracking_lost_is_failure: true
+
+# Degradation simulation
+degradation:
+  camera:
+    motion_blur_kernel_sizes: [5, 9, 15]
+    gaussian_noise_std: [10, 25, 50]
+    brightness_change: [-50, -30, 30, 50]
+    image_dropout_prob: [0.1, 0.3, 0.5]
+  imu:
+    bias_drift_std: [0.01, 0.05, 0.1]
+    noise_amplification: [2.0, 5.0, 10.0]
+
+# Model
+model:
+  type: "transformer"  # mlp, lstm, transformer
+  mlp:
+    hidden_dims: [128, 64, 32]
+    dropout: 0.3
+  lstm:
+    hidden_dim: 64
+    num_layers: 2
+    dropout: 0.3
+  transformer:
+    d_model: 64
+    nhead: 4
+    num_layers: 2
+    dropout: 0.3
+
+# Training
+training:
+  batch_size: 64
+  learning_rate: 0.001
+  epochs: 100
+  early_stopping_patience: 10
+  weight_decay: 0.0001

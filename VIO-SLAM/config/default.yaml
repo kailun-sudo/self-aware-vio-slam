@@ -1,0 +1,15 @@
+dataset:
+  camera: "cam0"
+  downsample_factor: 10
+  default_data_path: "data/mav0"
+
+slam:
+  window_size: 3
+  orb_features: 1000
+  max_matches: 500
+  ransac_threshold: 1.0
+  gravity: [0.0, 0.0, -9.81]
+
+visualization:
+  show_trajectory: false
+  save_plot: false
