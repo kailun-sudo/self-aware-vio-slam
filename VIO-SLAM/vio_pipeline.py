@@ -96,6 +96,20 @@ class OnlinePredictionRecord:
     frames_seen: int
 
 
+@dataclass
+class SensorDegradationConfig:
+    """Configurable sensor degradation injected during EuRoC playback."""
+
+    camera_degradation: Optional[str] = None
+    imu_degradation: Optional[str] = None
+    severity: float = 0.5
+    seed: int = 42
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.camera_degradation or self.imu_degradation)
+
+
 class OnlineSelfAwareBridge:
     """Maintain a streaming self-aware predictor in a sidecar Python process."""
 
@@ -342,6 +356,75 @@ def resolve_data_path(explicit_path: Optional[str] = None) -> Optional[Path]:
     return None
 
 
+def _frame_seed(base_seed: int, frame_key: int) -> int:
+    return int((base_seed + frame_key * 9973) % (2**32 - 1))
+
+
+def apply_camera_degradation(
+    image: np.ndarray,
+    degradation_config: Optional[SensorDegradationConfig],
+    frame_key: int,
+) -> np.ndarray:
+    if degradation_config is None or not degradation_config.camera_degradation:
+        return image
+
+    rng = np.random.RandomState(_frame_seed(degradation_config.seed, frame_key))
+    degraded = image.astype(np.float32)
+    severity = float(np.clip(degradation_config.severity, 0.0, 1.0))
+    degradation_type = degradation_config.camera_degradation
+
+    if degradation_type == "motion_blur":
+        kernel_size = max(3, int(round(3 + severity * 10)))
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        kernel = np.zeros((kernel_size, kernel_size), dtype=np.float32)
+        if rng.rand() < 0.5:
+            kernel[kernel_size // 2, :] = 1.0 / kernel_size
+        else:
+            kernel[:, kernel_size // 2] = 1.0 / kernel_size
+        degraded = cv2.filter2D(degraded, -1, kernel)
+    elif degradation_type == "gaussian_noise":
+        noise_std = 10.0 + severity * 35.0
+        degraded += rng.normal(0.0, noise_std, size=degraded.shape)
+    elif degradation_type == "brightness_change":
+        alpha = 1.0 + rng.uniform(-0.6, 0.6) * severity
+        beta = rng.uniform(-60.0, 60.0) * severity
+        degraded = degraded * alpha + beta
+    elif degradation_type == "image_dropout":
+        if rng.rand() < severity * 0.35:
+            degraded = np.zeros_like(degraded)
+
+    return np.clip(degraded, 0, 255).astype(np.uint8)
+
+
+def apply_imu_degradation(
+    gyro: np.ndarray,
+    accel: np.ndarray,
+    degradation_config: Optional[SensorDegradationConfig],
+) -> Tuple[np.ndarray, np.ndarray]:
+    if degradation_config is None or not degradation_config.imu_degradation:
+        return gyro, accel
+
+    rng = np.random.RandomState(degradation_config.seed)
+    severity = float(np.clip(degradation_config.severity, 0.0, 1.0))
+    degradation_type = degradation_config.imu_degradation
+    degraded_gyro = gyro.astype(np.float64).copy()
+    degraded_accel = accel.astype(np.float64).copy()
+
+    if degradation_type == "bias_drift":
+        gyro_walk = np.cumsum(rng.normal(0.0, 0.0005 * severity, size=degraded_gyro.shape), axis=0)
+        accel_walk = np.cumsum(rng.normal(0.0, 0.01 * severity, size=degraded_accel.shape), axis=0)
+        degraded_gyro += gyro_walk
+        degraded_accel += accel_walk
+    elif degradation_type == "noise_amplification":
+        gyro_scale = np.maximum(np.std(degraded_gyro, axis=0, keepdims=True), 1e-4)
+        accel_scale = np.maximum(np.std(degraded_accel, axis=0, keepdims=True), 1e-3)
+        degraded_gyro += rng.normal(0.0, gyro_scale * severity * 2.0, size=degraded_gyro.shape)
+        degraded_accel += rng.normal(0.0, accel_scale * severity * 2.0, size=degraded_accel.shape)
+
+    return degraded_gyro.astype(np.float64), degraded_accel.astype(np.float64)
+
+
 def _safe_normalize(vector: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(vector)
     if norm < 1e-8:
@@ -372,6 +455,7 @@ def compute_visual_measurements(
     orb_features: int,
     max_matches: int,
     ransac_threshold: float,
+    degradation_config: Optional[SensorDegradationConfig] = None,
 ) -> Tuple[List[np.ndarray], List[np.ndarray], List[PairDiagnostics]]:
     """Compute pairwise visual measurements for a sliding window."""
     orb = cv2.ORB_create(nfeatures=orb_features)
@@ -386,6 +470,11 @@ def compute_visual_measurements(
         img2 = cv2.imread(image_paths[idx + 1], cv2.IMREAD_GRAYSCALE)
         if img1 is None or img2 is None:
             raise FileNotFoundError(f"Failed to read image pair: {image_paths[idx]}, {image_paths[idx + 1]}")
+
+        frame_key_1 = int(Path(image_paths[idx]).stem)
+        frame_key_2 = int(Path(image_paths[idx + 1]).stem)
+        img1 = apply_camera_degradation(img1, degradation_config, frame_key_1)
+        img2 = apply_camera_degradation(img2, degradation_config, frame_key_2)
 
         kp1, des1 = orb.detectAndCompute(img1, None)
         kp2, des2 = orb.detectAndCompute(img2, None)
@@ -466,6 +555,7 @@ def slide_window_vio(
     max_matches: int,
     ransac_threshold: float,
     gravity: np.ndarray,
+    degradation_config: Optional[SensorDegradationConfig] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
     """Run one sliding-window optimization step."""
     preintegrator = IMUPreintegrator(gravity=gravity)
@@ -496,6 +586,7 @@ def slide_window_vio(
         orb_features=orb_features,
         max_matches=max_matches,
         ransac_threshold=ransac_threshold,
+        degradation_config=degradation_config,
     )
 
     translation_dirs = [_safe_normalize(t) for t in translations_vis]
@@ -545,9 +636,15 @@ def slide_window_vio(
 class NotebookDerivedVIOPipeline:
     """Primary VIO-SLAM pipeline extracted from the validated notebook."""
 
-    def __init__(self, config: Dict, online_predictor: Optional[OnlineSelfAwareBridge] = None):
+    def __init__(
+        self,
+        config: Dict,
+        online_predictor: Optional[OnlineSelfAwareBridge] = None,
+        degradation_config: Optional[SensorDegradationConfig] = None,
+    ):
         self.config = config
         self.online_predictor = online_predictor
+        self.degradation_config = degradation_config
         self.metrics_records: List[MetricsRecord] = []
         self.online_prediction_records: List[OnlinePredictionRecord] = []
         self.trajectory_positions = np.zeros((0, 3), dtype=np.float64)
@@ -570,10 +667,19 @@ class NotebookDerivedVIOPipeline:
         ts_img, image_paths = loader.load_images(camera)
         ts_imu, gyro, accel = loader.load_imu()
         camera_matrix = loader.get_camera_matrix(camera)
+        gyro, accel = apply_imu_degradation(gyro, accel, self.degradation_config)
 
         num_windows = len(ts_img) - window_size
         starts = list(range(0, max(num_windows, 0), downsample))
         logger.info("Running notebook-derived VIO pipeline on %s windows", len(starts))
+        if self.degradation_config is not None and self.degradation_config.enabled:
+            logger.info(
+                "Sensor degradation enabled: camera=%s imu=%s severity=%.2f seed=%s",
+                self.degradation_config.camera_degradation or "none",
+                self.degradation_config.imu_degradation or "none",
+                self.degradation_config.severity,
+                self.degradation_config.seed,
+            )
 
         trajectory_positions: List[np.ndarray] = []
         trajectory_yaws: List[float] = []
@@ -601,6 +707,7 @@ class NotebookDerivedVIOPipeline:
                     max_matches=max_matches,
                     ransac_threshold=ransac_threshold,
                     gravity=gravity,
+                    degradation_config=self.degradation_config,
                 )
 
                 increment = positions_opt[-1]
@@ -743,4 +850,8 @@ class NotebookDerivedVIOPipeline:
             "mean_inlier_ratio": mean_inlier_ratio,
             "online_predictions": int(len(self.online_prediction_records)),
             "online_failure_probability_mean": float(np.mean([record.failure_probability for record in self.online_prediction_records])) if self.online_prediction_records else 0.0,
+            "degradation_enabled": bool(self.degradation_config and self.degradation_config.enabled),
+            "camera_degradation": self.degradation_config.camera_degradation if self.degradation_config else "none",
+            "imu_degradation": self.degradation_config.imu_degradation if self.degradation_config else "none",
+            "degradation_severity": float(self.degradation_config.severity) if self.degradation_config else 0.0,
         }

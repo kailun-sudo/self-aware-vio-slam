@@ -35,6 +35,8 @@ EuRoC mav0
 - Online predictor sidecar attached to the VIO loop
 - CSV export of internal tracking and optimization metrics
 - Interactive local GUI demo for trajectory risk playback
+- EuRoC playback with controllable camera / IMU degradation injection
+- Baseline-vs-degraded comparison GUI for self-awareness stress testing
 - Packaging of unified runs into reusable training-ready sequences
 
 ## Demo Screenshots
@@ -46,6 +48,10 @@ Trajectory colored by online failure probability:
 Interactive dashboard source view:
 
 ![Online system dashboard](docs/assets/online_system_dashboard.png)
+
+Baseline-vs-degraded playback comparison:
+
+![Degradation comparison overview](docs/assets/degradation_comparison_overview.png)
 
 ## Quick Start
 
@@ -93,6 +99,24 @@ Then open:
 
 ```text
 outputs/mh01_online_gui/visual_demo.html
+```
+
+Run EuRoC playback with degradation injection and generate the comparison GUI:
+
+```bash
+self_aware_slam/venv/bin/python integration/run_euroc_degradation_demo.py \
+  --data-path VIO-SLAM/data/mav0 \
+  --camera-degradation motion_blur \
+  --imu-degradation bias_drift \
+  --severity 0.6 \
+  --downsample 120 \
+  --output-root outputs/euroc_degradation_quick
+```
+
+Then open:
+
+```text
+outputs/euroc_degradation_quick/comparison/gui/visual_demo.html
 ```
 
 ## Documentation

@@ -319,6 +319,100 @@ head -n 20 /Users/kailunwang/Desktop/ossa/outputs/mh01_self_aware/reliability_pr
 
 - 它回答的是：`SLAM 认为自己走到了哪里？`
 
+---
+
+## 6. EuRoC 回放 + 退化注入仿真怎么理解
+
+现在这套系统除了正常 EuRoC 回放，还支持一个非常适合展示和实验的模式：
+
+- 同一条 EuRoC `mav0`
+- 一次跑 baseline
+- 一次跑 degraded
+- 然后把两条结果一起送进 self-aware 模块做对比
+
+这条链的主入口是：
+
+```text
+/Users/kailunwang/Desktop/ossa/integration/run_euroc_degradation_demo.py
+```
+
+它内部会做 5 件事：
+
+1. 跑 baseline `VIO-SLAM/run_pipeline.py`
+2. 跑 degraded `VIO-SLAM/run_pipeline.py`
+3. 对两条结果分别跑 `run_offline_unified_demo.py`
+4. 输出比较摘要和图
+5. 自动生成 baseline vs degraded 对比 GUI
+
+### 退化到底注入到哪里
+
+不是只在 ML 层伪造数值，而是直接在主 VIO 回放时注入退化：
+
+- 图像退化：
+  - `motion_blur`
+  - `gaussian_noise`
+  - `brightness_change`
+  - `image_dropout`
+- IMU 退化：
+  - `bias_drift`
+  - `noise_amplification`
+
+也就是说，你现在可以讲得更准确一点：
+
+**这不是纯离线表格增强，而是作用在 EuRoC 回放执行过程中的 sensor degradation simulation。**
+
+### 为什么这一步重要
+
+因为它把你的项目从“我能预测风险”推进到了：
+
+- 我能主动构造退化场景
+- 我能比较退化前后系统状态变化
+- 我能观察 self-aware 输出是否随系统退化同步变化
+
+这在面试、汇报和后续实验设计里都很有用。
+
+### 这一步会产出什么
+
+如果你跑：
+
+```bash
+/Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
+  /Users/kailunwang/Desktop/ossa/integration/run_euroc_degradation_demo.py \
+  --data-path /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/mav0 \
+  --camera-degradation motion_blur \
+  --imu-degradation bias_drift \
+  --severity 0.6 \
+  --downsample 120 \
+  --output-root /Users/kailunwang/Desktop/ossa/outputs/euroc_degradation_quick
+```
+
+你会同时得到：
+
+- `baseline_vio/`
+- `degraded_vio/`
+- `baseline_self_aware/`
+- `degraded_self_aware/`
+- `comparison/comparison_summary.txt`
+- `comparison/comparison_metrics.csv`
+- `comparison/comparison_overview.png`
+- `comparison/gui/visual_demo.html`
+
+### 这个 comparison GUI 是干什么的
+
+它不是重复单路 GUI，而是专门回答：
+
+- 退化后轨迹有没有明显变化
+- failure probability 有没有抬高
+- confidence 有没有降低
+- 哪些帧的风险增量最大
+- tracking 质量指标有没有同步恶化
+
+所以它更像一个：
+
+**stress test dashboard**
+
+而不是普通 demo 页面。
+
 ### `pose_errors.csv`
 
 这是把 `estimated_tum.txt` 和 ground truth 对齐后得到的真实误差。

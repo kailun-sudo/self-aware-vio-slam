@@ -9,7 +9,13 @@ import argparse
 import logging
 from pathlib import Path
 
-from vio_pipeline import NotebookDerivedVIOPipeline, OnlineSelfAwareBridge, load_config, resolve_data_path
+from vio_pipeline import (
+    NotebookDerivedVIOPipeline,
+    OnlineSelfAwareBridge,
+    SensorDegradationConfig,
+    load_config,
+    resolve_data_path,
+)
 
 
 def setup_logging(verbose: bool = False):
@@ -64,6 +70,18 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Optional train_dataset.pkl path with normalization stats.")
     parser.add_argument("--online_predictions_output", type=str, default=None,
                         help="Optional output path for online self-aware predictions CSV.")
+    parser.add_argument("--simulate_degradation", action="store_true",
+                        help="Inject deterministic camera/IMU degradation during EuRoC playback.")
+    parser.add_argument("--camera_degradation", type=str, default=None,
+                        choices=["motion_blur", "gaussian_noise", "brightness_change", "image_dropout"],
+                        help="Camera degradation mode for simulation playback.")
+    parser.add_argument("--imu_degradation", type=str, default=None,
+                        choices=["bias_drift", "noise_amplification"],
+                        help="IMU degradation mode for simulation playback.")
+    parser.add_argument("--degradation_severity", type=float, default=0.5,
+                        help="Degradation severity in [0, 1].")
+    parser.add_argument("--degradation_seed", type=int, default=42,
+                        help="Random seed used to deterministically replay degraded observations.")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
     return parser
 
@@ -111,7 +129,29 @@ def main() -> int:
         )
         logger.info("Online self-aware predictor enabled via %s", args.self_aware_python)
 
-    pipeline = NotebookDerivedVIOPipeline(config, online_predictor=online_predictor)
+    degradation_config = None
+    if args.simulate_degradation:
+        if args.camera_degradation is None and args.imu_degradation is None:
+            parser.error("--simulate_degradation requires --camera_degradation and/or --imu_degradation")
+        degradation_config = SensorDegradationConfig(
+            camera_degradation=args.camera_degradation,
+            imu_degradation=args.imu_degradation,
+            severity=args.degradation_severity,
+            seed=args.degradation_seed,
+        )
+        logger.info(
+            "Simulation mode enabled: camera=%s imu=%s severity=%.2f seed=%s",
+            args.camera_degradation or "none",
+            args.imu_degradation or "none",
+            args.degradation_severity,
+            args.degradation_seed,
+        )
+
+    pipeline = NotebookDerivedVIOPipeline(
+        config,
+        online_predictor=online_predictor,
+        degradation_config=degradation_config,
+    )
     trajectory = pipeline.run(str(data_path))
 
     pipeline.save_metrics_csv(str(output_dir / "slam_metrics.csv"))

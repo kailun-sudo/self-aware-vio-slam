@@ -358,3 +358,66 @@ bash /Users/kailunwang/Desktop/ossa/integration/run_linux_vm_pipeline.sh \
 - 当前主 SLAM 以 notebook 中已验证的纯 Python sliding-window VIO 为主，不再以旧 `src/vio_slam` 包为主
 - `legacy_python_vio_slam/` 仍然保留，但不再是当前运行入口
 - 如果 Mac 本地没有 EuRoC 数据，`run_pipeline.py` 只能先做参数验证，不能跑真实序列
+
+## 12. EuRoC 回放 + 退化注入仿真
+
+如果你想演示“正常回放 vs 退化回放”对主 VIO 和 self-aware 结果的影响，可以直接运行：
+
+```bash
+/Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
+  /Users/kailunwang/Desktop/ossa/integration/run_euroc_degradation_demo.py \
+  --data-path /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/mav0 \
+  --camera-degradation motion_blur \
+  --imu-degradation bias_drift \
+  --severity 0.6 \
+  --output-root /Users/kailunwang/Desktop/ossa/outputs/euroc_degradation_demo
+```
+
+如果你只想先快速演示，可以加大 `downsample`：
+
+```bash
+/Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
+  /Users/kailunwang/Desktop/ossa/integration/run_euroc_degradation_demo.py \
+  --data-path /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/mav0 \
+  --camera-degradation motion_blur \
+  --imu-degradation bias_drift \
+  --severity 0.6 \
+  --downsample 120 \
+  --output-root /Users/kailunwang/Desktop/ossa/outputs/euroc_degradation_quick
+```
+
+可选退化类型：
+
+- 相机：`motion_blur`、`gaussian_noise`、`brightness_change`、`image_dropout`
+- IMU：`bias_drift`、`noise_amplification`
+
+脚本会自动完成：
+
+1. baseline EuRoC 回放
+2. degraded EuRoC 回放
+3. 两条结果分别做 offline self-aware inference
+4. 输出对比摘要和图
+
+关键输出：
+
+- `baseline_vio/`
+- `degraded_vio/`
+- `baseline_self_aware/`
+- `degraded_self_aware/`
+- `comparison/comparison_summary.txt`
+- `comparison/comparison_metrics.csv`
+- `comparison/comparison_overview.png`
+- `comparison/gui/visual_demo.html`
+
+对比 GUI 页面会自动生成在：
+
+```text
+/Users/kailunwang/Desktop/ossa/outputs/euroc_degradation_quick/comparison/gui/visual_demo.html
+```
+
+这个页面支持：
+
+- baseline / degraded 双轨迹同步查看
+- failure probability 与 confidence 双路时间线对比
+- tracking / error 指标对比
+- 跳转到退化后风险抬升最明显的帧
