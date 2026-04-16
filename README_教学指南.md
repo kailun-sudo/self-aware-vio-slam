@@ -1,4 +1,4 @@
-# ORB-SLAM with Self-Awareness 教学指南
+# Self-Aware VIO-SLAM 教学指南
 
 这份文档不是简单的命令清单，而是带你**理解整条 unified pipeline 链路**。
 

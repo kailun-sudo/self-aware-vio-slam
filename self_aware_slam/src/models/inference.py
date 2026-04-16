@@ -1,5 +1,5 @@
 """
-Offline and streaming inference utilities for unified ORB-SLAM with self-awareness.
+Offline and streaming inference utilities for unified Self-Aware VIO-SLAM.
 """
 
 import argparse

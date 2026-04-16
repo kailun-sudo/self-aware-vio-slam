@@ -427,7 +427,7 @@ def _write_html_report(demo: pd.DataFrame, output_dir: str):
 <body>
   <div class="page">
     <section class="hero">
-      <h1>ORB-SLAM with Self-Awareness GUI Demo</h1>
+      <h1>Self-Aware VIO-SLAM GUI Demo</h1>
       <p>这不是静态报告，而是一个可交互的本地 GUI 页面。你可以拖动时间轴、自动播放、跳到高风险帧，同时观察轨迹位置、失效概率、置信度、真实误差和 tracking 指标如何一起变化。</p>
 
       <div class="metrics">

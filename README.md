@@ -1,4 +1,4 @@
-# ORB-SLAM 与 Self-Awareness 统一项目
+# Self-Aware VIO-SLAM 统一项目
 
 详细运行方式请直接看：
 

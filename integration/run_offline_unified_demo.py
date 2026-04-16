@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run the minimum offline unified ORB-SLAM + self-aware SLAM demo.
+Run the minimum offline Self-Aware VIO-SLAM demo.
 """
 
 import argparse
@@ -115,7 +115,7 @@ def run_demo(metrics_path: str,
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run offline unified ORB-SLAM self-awareness demo')
+    parser = argparse.ArgumentParser(description='Run offline unified Self-Aware VIO-SLAM demo')
     parser.add_argument('--metrics', type=str, required=True, help='Path to exported slam_metrics.csv')
     parser.add_argument('--estimated', type=str, required=True, help='Path to exported estimated TUM trajectory')
     parser.add_argument('--groundtruth', type=str, required=True, help='Path to ground-truth trajectory file')

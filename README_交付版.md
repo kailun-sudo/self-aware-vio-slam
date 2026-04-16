@@ -1,4 +1,4 @@
-# ORB-SLAM with Self-Awareness
+# Self-Aware VIO-SLAM
 
 ## 项目目标
 
