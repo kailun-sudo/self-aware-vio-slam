@@ -2,9 +2,9 @@
 
 详细运行方式请直接看：
 
-- [README_运行指南.md](/Users/kailunwang/Desktop/ossa/README_运行指南.md)
-- [README_教学指南.md](/Users/kailunwang/Desktop/ossa/README_教学指南.md)
-- [README_交付版.md](/Users/kailunwang/Desktop/ossa/README_交付版.md)
+- [README_运行指南.md](README_运行指南.md)
+- [README_教学指南.md](README_教学指南.md)
+- [README_交付版.md](README_交付版.md)
 
 当前目录语义：
 
