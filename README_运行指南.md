@@ -136,6 +136,32 @@
 其中 degraded replay runs 不再只是普通 run-level shuffle，而是按
 `(sequence, base_scenario)` 作为 **replay family** 做 split，保证同一 replay family 不跨 train / val / test。
 
+默认 `split_protocol = family_aware_dev`，它适合：
+
+- 先验证问题是否可学
+- 控制 replay family 泄漏
+- 保留更多训练样本
+
+如果你要做严格的跨 sequence 泛化 benchmark，可以显式改成：
+
+```bash
+cd /Users/kailunwang/Desktop/ossa/self_aware_slam
+./venv/bin/python -m src.data.dataset_builder \
+  --split-protocol sequence_held_out \
+  --output-path results/train_dataset_v2_sequence_held_out.pkl
+```
+
+这会保证同一个 sequence 的 baseline + degraded runs 全部进入同一个 split。
+
+注意：基于当前公开的 `multisequence_degradation_grid` 结果，`MH_04_difficult` 和 `MH_05_difficult` 的 degraded runs 由于 downsample 后长度太短，很多会在 `window_size=10` 和 `prediction_horizon=10` 下被跳过。
+
+所以当前 `sequence_held_out` 更准确地说是：
+
+- 结构上严格避免 sequence leakage
+- 但 `val/test` 里可用的 degraded 样本还偏少
+
+如果你要做更强的 strict benchmark，下一步应当重跑 `MH_04/MH_05` 的 degradation replay，并降低 downsample。
+
 builder 现在会显式打印：
 
 - `data source selected`

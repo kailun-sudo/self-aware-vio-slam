@@ -210,6 +210,35 @@ builder 会显式打印：
 - 找到多少 replay runs
 - 是否触发 fallback
 
+当前默认 `split_protocol = family_aware_dev`，它的定位是：
+
+- 用于开发阶段
+- 先验证模型能不能学出来
+- 控制 replay family leakage，但不声称“跨 sequence 泛化”
+
+如果你要做严格的泛化 benchmark，就要单独构建：
+
+```bash
+cd /Users/kailunwang/Desktop/ossa/self_aware_slam
+./venv/bin/python -m src.data.dataset_builder \
+  --split-protocol sequence_held_out \
+  --output-path results/train_dataset_v2_sequence_held_out.pkl
+```
+
+这个 protocol 会把同一个 sequence 的 baseline + degraded 全部放到同一个 split。
+
+当前要额外注意一个现实问题：
+
+- 公开 sweep 里的 `MH_04_difficult` / `MH_05_difficult` degraded runs 是 downsample 过的
+- 在 `window_size=10` + `prediction_horizon=10` 下，很多 strict held-out degraded runs 会因为太短被跳过
+
+所以当前 `sequence_held_out` 的意义主要是：
+
+- 严格避免 sequence leakage
+- 先建立正确 benchmark protocol
+
+但如果你要做更强的 held-out 泛化实验，还需要重新生成更长的 hard-sequence degraded replay 数据。
+
 ---
 
 ## 4. 手把手跑一遍主链路

@@ -28,6 +28,7 @@ Runtime inference remains on the legacy 7-D feature set.
 
 from __future__ import annotations
 
+import argparse
 import os
 import pickle
 import sys
@@ -82,6 +83,13 @@ def _resolve_dataset_path(config: dict) -> str:
         'train_dataset_path',
         os.path.join(config['paths']['results_dir'], 'train_dataset_v2.pkl'),
     )
+
+
+def _canonical_sequence_group(name: str) -> str:
+    parts = name.split('_')
+    if len(parts) >= 2:
+        return '_'.join(parts[:2])
+    return name
 
 
 def _resolve_path(path_value: str | None) -> Path | None:
@@ -148,6 +156,7 @@ def _load_sequence_records(data_dir: Path, sequences: List[str]) -> List[Dict[st
             {
                 'run_id': seq,
                 'sequence': seq,
+                'sequence_group': _canonical_sequence_group(seq),
                 'run_kind': 'sequence_dir',
                 'base_scenario': 'baseline',
                 'scenario': 'baseline',
@@ -189,6 +198,7 @@ def _load_run_records_from_sweep(sweep_results_path: Path, include_baseline: boo
                     {
                         'run_id': f"{sequence}::baseline",
                         'sequence': sequence,
+                        'sequence_group': row.get('sequence_short', _canonical_sequence_group(sequence)),
                         'run_kind': 'baseline',
                         'family_id': f"{sequence}::baseline",
                         'base_scenario': 'baseline',
@@ -207,6 +217,7 @@ def _load_run_records_from_sweep(sweep_results_path: Path, include_baseline: boo
                 {
                     'run_id': f"{sequence}::{row['scenario']}",
                     'sequence': sequence,
+                    'sequence_group': row.get('sequence_short', _canonical_sequence_group(sequence)),
                     'run_kind': 'degraded',
                     'family_id': f"{sequence}::{row.get('replay_family', row.get('base_scenario', row['scenario']))}",
                     'base_scenario': row.get('base_scenario', row['scenario']),
@@ -258,6 +269,7 @@ def _split_run_records(records: List[Dict[str, object]], config: dict) -> Dict[s
             {
                 'run_id': record['run_id'],
                 'sequence': record['sequence'],
+                'sequence_group': record.get('sequence_group', _canonical_sequence_group(record['sequence'])),
                 'run_kind': record['run_kind'],
                 'family_id': record.get('family_id', record['run_id']),
                 'base_scenario': record['base_scenario'],
@@ -274,7 +286,7 @@ def _split_run_records(records: List[Dict[str, object]], config: dict) -> Dict[s
     record_map = {record['run_id']: record for record in records}
     rng = np.random.RandomState(split_seed)
 
-    for sequence, seq_group in frame.groupby('sequence', sort=True):
+    for sequence_group, seq_group in frame.groupby('sequence_group', sort=True):
         baseline_group = seq_group[seq_group['run_kind'] == 'baseline']
         degraded_group = seq_group[seq_group['run_kind'] != 'baseline']
 
@@ -394,8 +406,16 @@ def _resolve_data_source(config: dict) -> Tuple[str, List[Dict[str, object]], Di
     raise FileNotFoundError("No usable dataset source found for sequence dirs or sweep runs.")
 
 
-def _split_sequence_records(records: List[Dict[str, object]], config: dict) -> Dict[str, List[Dict[str, object]]]:
-    n_seq = len(records)
+def _split_sequence_groups(records: List[Dict[str, object]], config: dict) -> Dict[str, List[Dict[str, object]]]:
+    if not records:
+        return {'train': [], 'val': [], 'test': []}
+
+    sequence_groups = {}
+    for record in records:
+        sequence_groups.setdefault(record.get('sequence_group', _canonical_sequence_group(record['sequence'])), []).append(record)
+
+    group_names = sorted(sequence_groups)
+    n_seq = len(group_names)
     if n_seq >= 5:
         train_indices = [0, 1, 2]
         val_indices = [3]
@@ -417,27 +437,31 @@ def _split_sequence_records(records: List[Dict[str, object]], config: dict) -> D
             test_indices = val_indices[-1:]
 
     return {
-        'train': [records[i] for i in train_indices],
-        'val': [records[i] for i in val_indices],
-        'test': [records[i] for i in test_indices],
+        'train': [record for i in train_indices for record in sequence_groups[group_names[i]]],
+        'val': [record for i in val_indices for record in sequence_groups[group_names[i]]],
+        'test': [record for i in test_indices for record in sequence_groups[group_names[i]]],
     }
 
 
 def _build_splits(records: List[Dict[str, object]], source_mode: str, config: dict) -> Dict[str, List[Dict[str, object]]]:
-    if source_mode == 'sweep_runs':
+    split_protocol = config['dataset'].get('split_protocol', 'family_aware_dev')
+
+    if split_protocol == 'sequence_held_out':
+        splits = _split_sequence_groups(records, config)
+    elif source_mode == 'sweep_runs':
         splits = _split_run_records(records, config)
     elif source_mode == 'hybrid':
         baseline_records = [record for record in records if record['run_kind'] == 'sequence_dir']
         degraded_records = [record for record in records if record['run_kind'] != 'sequence_dir']
-        baseline_records = sorted(baseline_records, key=lambda record: record['sequence'])
-        baseline_splits = _split_sequence_records(baseline_records, config)
+        baseline_records = sorted(baseline_records, key=lambda record: record['sequence_group'])
+        baseline_splits = _split_sequence_groups(baseline_records, config)
         degraded_splits = _split_run_records(degraded_records, config)
         splits = {
             split_name: baseline_splits[split_name] + degraded_splits[split_name]
             for split_name in ['train', 'val', 'test']
         }
     else:
-        splits = _split_sequence_records(records, config)
+        splits = _split_sequence_groups(records, config)
 
     print(
         "\nSplit:"
@@ -480,6 +504,7 @@ def build_dataset(config: dict | None = None) -> Dict:
         'feature_names': learning_feature_names,
         'window_size': window_size,
         'source_mode': source_mode,
+        'split_protocol': config['dataset'].get('split_protocol', 'family_aware_dev'),
         'source_info': source_info,
         'target_definition': {
             'mode': config['targets']['mode'],
@@ -494,6 +519,7 @@ def build_dataset(config: dict | None = None) -> Dict:
                 {
                     'run_id': record['run_id'],
                     'sequence': record['sequence'],
+                    'sequence_group': record.get('sequence_group', _canonical_sequence_group(record['sequence'])),
                     'run_kind': record['run_kind'],
                     'family_id': record.get('family_id', record['run_id']),
                     'scenario': record['scenario'],
@@ -588,15 +614,29 @@ def load_dataset(path: str) -> Dict:
 
 
 def main():
-    config = load_config()
+    parser = argparse.ArgumentParser(description="Build the self-aware training dataset.")
+    parser.add_argument('--config', default=None, help='Path to config.yaml')
+    parser.add_argument(
+        '--split-protocol',
+        choices=['family_aware_dev', 'sequence_held_out'],
+        default=None,
+        help='Override dataset split protocol.',
+    )
+    parser.add_argument('--output-path', default=None, help='Override output dataset path.')
+    args = parser.parse_args()
+
+    config = load_config(args.config) if args.config else load_config()
+    if args.split_protocol:
+        config['dataset']['split_protocol'] = args.split_protocol
     print("Building reliability dataset...")
     dataset = build_dataset(config)
 
-    output_path = _resolve_dataset_path(config)
+    output_path = args.output_path or _resolve_dataset_path(config)
     save_dataset(dataset, output_path)
 
     print("\nDataset summary:")
     print(f"  source_mode: {dataset['source_mode']}")
+    print(f"  split_protocol: {dataset['split_protocol']}")
     print(f"  source_info: {dataset['source_info']}")
     for split in ['train', 'val', 'test']:
         X = dataset[split]['X']

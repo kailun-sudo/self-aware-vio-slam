@@ -166,6 +166,7 @@ The v2 dataset differs from the currently deployed runtime model in two ways:
 - it now prefers a **hybrid training source**: long baseline sequence dirs + degraded replay runs
 - degraded replay runs are split by **sequence-aware replay family** (currently `(sequence, base_scenario)`), so the same replay family does not cross train/val/test
 - the builder now prints **selected source / replay-run count / fallback status** so source selection is auditable
+- the default split protocol is **`family_aware_dev`**; use `--split-protocol sequence_held_out` for a strict cross-sequence benchmark dataset
 
 Validate whether the currently deployed predictor is actually aligned with real pose error:
 

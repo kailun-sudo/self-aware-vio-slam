@@ -239,6 +239,23 @@ builder 还会显式打印：
 - 找到多少 replay runs
 - 是否触发 fallback
 
+当前 builder 支持两套 split protocol：
+
+- `family_aware_dev`
+  - 默认值
+  - 适合开发阶段验证 learnability
+  - degraded runs 按 replay family 切分
+- `sequence_held_out`
+  - 严格跨 sequence benchmark
+  - 同一个 sequence 的 baseline + degraded 全部进入同一个 split
+
+当前实现上的 caveat 是：
+
+- `MH_04_difficult` / `MH_05_difficult` 的公开 degraded replay runs 仍然比较短
+- 在 strict held-out protocol 下，它们中的很多会因为 `window_size + prediction_horizon` 约束被跳过
+
+所以 `sequence_held_out` 现在主要解决的是 **protocol correctness**，而不是已经拥有一个非常强的 hard-sequence degraded held-out set。
+
 这样做的目的很直接：
 
 - 让 train 真正看到 failure

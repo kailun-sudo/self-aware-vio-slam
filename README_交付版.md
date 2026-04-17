@@ -196,6 +196,8 @@ self_aware_slam/results/
 - 数据源：长 baseline 序列 + degraded replay runs
 - degraded split：按 `(sequence, base_scenario)` 的 replay family 切分，避免同一 replay family 跨 split
 - source_mode=auto：优先 `hybrid`，否则 `sweep_runs`，最后才回退到 `sequence_dirs`
+- 默认 split_protocol=`family_aware_dev`；如果要评估严格跨 sequence 泛化，应单独构建 `sequence_held_out` 数据集
+- 当前 strict held-out protocol 已可用，但 `MH_04/MH_05` 的公开 degraded replay runs 仍偏短，实际 held-out degraded 样本有限
 
 ## 最小运行流程
 

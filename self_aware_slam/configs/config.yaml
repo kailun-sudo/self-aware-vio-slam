@@ -26,6 +26,7 @@ dataset:
   val_split: 0.15
   test_split: 0.15
   source_mode: "auto"   # auto, hybrid, sweep_runs, sequence_dirs
+  split_protocol: "family_aware_dev"  # family_aware_dev, sequence_held_out
   include_baseline_runs: true
   baseline_runs_in_train: true
   run_split_seed: 42
