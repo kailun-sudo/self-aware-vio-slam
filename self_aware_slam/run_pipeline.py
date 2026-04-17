@@ -103,7 +103,10 @@ def run_dataset_building(config):
     print("=" * 60)
     from src.data.dataset_builder import build_dataset, save_dataset
     dataset = build_dataset(config)
-    output_path = os.path.join(config['paths']['results_dir'], 'train_dataset.pkl')
+    output_path = config['paths'].get(
+        'train_dataset_path',
+        os.path.join(config['paths']['results_dir'], 'train_dataset_v2.pkl'),
+    )
     save_dataset(dataset, output_path)
     return dataset
 

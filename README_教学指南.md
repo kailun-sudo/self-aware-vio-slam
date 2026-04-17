@@ -154,6 +154,7 @@
 - `VIO-SLAM/data/mav0`
 - `self_aware_slam/results/models/...`
 - `self_aware_slam/results/train_dataset.pkl`
+- `self_aware_slam/results/train_dataset_v2.pkl`
 
 ### 中间产物
 
@@ -182,6 +183,18 @@
 - `self_aware_slam/slam_metrics_dataset/MH_01_unified/pose_errors.csv`
 - `self_aware_slam/slam_metrics_dataset/MH_01_unified/groundtruth.csv`
 - `self_aware_slam/slam_metrics_dataset/MH_01_unified/estimated.csv`
+
+如果你走新的 self-aware 训练线，还会有：
+
+- `self_aware_slam/results/train_dataset_v2.pkl`
+
+这份 v2 数据集和旧训练缓存的核心区别是：
+
+- 旧版更偏“当前诊断量 + 混合标签”
+- v2 明确统一成：
+  - 输入：22 维 trend-aware learning features
+  - 回归目标：未来 10 帧内的 `future_max_pose_error`
+  - 分类目标：`future_max_pose_error > 0.18m` 或未来 tracking lost
 
 ---
 
@@ -225,6 +238,31 @@ cd /Users/kailunwang/Desktop/ossa/VIO-SLAM
 - 终端里会看到 `Pipeline finished`
 - `outputs/mh01/slam_metrics.csv` 存在
 - `outputs/mh01/estimated_tum.txt` 存在
+
+### Step 1.5：构建 v2 学习数据集
+
+如果你现在的目标是“把 self-aware 训练问题重新定义正确”，就执行：
+
+```bash
+cd /Users/kailunwang/Desktop/ossa/self_aware_slam
+./venv/bin/python -m src.data.dataset_builder
+```
+
+这一步不是做推理，而是把训练任务收敛成一个更可学的问题。
+
+当前这版 v2 的 sanity check 结果是：
+
+- `window_size = 10`
+- `feature_dim = 22`
+- `train failure rate ≈ 8.4%`
+- `val failure rate ≈ 18.9%`
+- `test failure rate ≈ 19.2%`
+
+这里最关键的变化不是“多了特征”，而是：
+
+- train / val / test 现在用了同一种 target 定义
+- classification 和 regression 现在都围绕同一个 future target
+- 不再是 train 学 current failure、eval 看 predictive failure 那种错位设置
 
 ### Step 2：跑 unified demo
 

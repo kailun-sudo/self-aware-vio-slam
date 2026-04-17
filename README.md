@@ -40,6 +40,7 @@ EuRoC mav0
 - Multi-sequence degradation sweep with composite scenarios, severity grids, benchmark tables, and interactive HTML report
 - Model validity benchmark with correlation, ROC, calibration, and heuristic comparisons
 - Packaging of unified runs into reusable training-ready sequences
+- V2 self-awareness training pipeline with unified future-error targets and trend-aware learning features
 
 ## Demo Screenshots
 
@@ -147,7 +148,23 @@ The aggregate report also writes stable benchmark tables:
 - `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.csv`
 - `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.md`
 
-Validate whether the learned predictor is actually aligned with real pose error:
+Build the v2 training dataset for a more learnable self-awareness task:
+
+```bash
+cd self_aware_slam
+./venv/bin/python -m src.data.dataset_builder
+```
+
+This writes:
+
+- `self_aware_slam/results/train_dataset_v2.pkl`
+
+The v2 dataset differs from the currently deployed runtime model in two ways:
+
+- it uses a **future** target (`future_max_pose_error` over the next 10 frames)
+- it uses **22 trend-aware learning features** instead of the current 7-D runtime feature set
+
+Validate whether the currently deployed predictor is actually aligned with real pose error:
 
 ```bash
 self_aware_slam/venv/bin/python integration/run_model_validity_benchmark.py \
@@ -177,5 +194,6 @@ The original Chinese documentation is intentionally kept unchanged for internal 
 ## Current Scope
 
 - The main SLAM runtime is a notebook-derived Python VIO pipeline, not a full C++ ORB-SLAM3 codebase
-- The self-aware model is integrated and runnable, but still has domain-shift limitations
+- The deployed self-aware model is integrated and runnable, but model-validity benchmark results show that its ranking/calibration quality is still weak
+- A v2 training path now exists with unified future targets and trend-aware features; it is intended to replace the current task definition rather than the current runtime checkpoint immediately
 - The current repository is optimized for a strong research prototype / portfolio project rather than production deployment

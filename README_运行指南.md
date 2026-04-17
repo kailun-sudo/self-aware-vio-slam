@@ -92,7 +92,32 @@
 /Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python
 ```
 
-## 4.3 一键下载 EuRoC 单序列
+### 4.3 当前 self-aware 有两条线
+
+- **runtime 推理线**
+  - 继续使用当前已训练 checkpoint
+  - 输入还是现有 `7` 维 runtime features
+  - 不影响 online/offline demo
+- **v2 训练线**
+  - 使用统一的 future target 定义
+  - 训练特征扩展为 `22` 维 trend-aware learning features
+  - 数据集输出路径：
+    `/Users/kailunwang/Desktop/ossa/self_aware_slam/results/train_dataset_v2.pkl`
+
+当前 v2 训练任务定义是：
+
+- regression target:
+  `future_max_pose_error` over next `10` frames
+- classification target:
+  `future_max_pose_error > 0.18m` or future tracking lost
+
+也就是说，v2 现在解决的是：
+
+```text
+看最近 10 帧内部状态 -> 预测接下来 10 帧内最坏会坏到什么程度
+```
+
+## 4.4 一键下载 EuRoC 单序列
 
 如果你本地没有 `mav0`，可以直接用下面的脚本下载并整理成：
 
@@ -175,6 +200,37 @@ cd /Users/kailunwang/Desktop/ossa/VIO-SLAM
 
 - `slam_metrics.csv`：给 self-aware 模块做推理
 - `estimated_tum.txt`：给 ground truth 对齐和误差计算
+
+## 5.2 构建 v2 训练数据集
+
+如果你要走新的 learnable training path，执行：
+
+```bash
+cd /Users/kailunwang/Desktop/ossa/self_aware_slam
+./venv/bin/python -m src.data.dataset_builder
+```
+
+这一步会生成：
+
+```text
+/Users/kailunwang/Desktop/ossa/self_aware_slam/results/train_dataset_v2.pkl
+```
+
+当前这份数据集已经验证过，核心元数据是：
+
+- `window_size = 10`
+- `feature_dim = 22`
+- `target.mode = future_window_max`
+- `prediction_horizon = 10`
+- `classification_error_threshold = 0.18`
+
+当前一版 sanity check 结果大致是：
+
+- `train failure rate ≈ 8.4%`
+- `val failure rate ≈ 18.9%`
+- `test failure rate ≈ 19.2%`
+
+这一步的作用不是跑 demo，而是为后续重新训练一个更合理的 self-aware predictor 做准备。
 
 ## 6. 第二步：运行 unified demo
 

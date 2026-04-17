@@ -59,6 +59,16 @@ self_aware_slam/configs/config.yaml
 
 - **104,706**
 
+但这里要区分两件事：
+
+- **当前 runtime predictor**
+  - 还是这套 `7` 维输入的 Transformer checkpoint
+  - 用于 online/offline demo
+- **新的 v2 训练路径**
+  - 已经改成 `22` 维 trend-aware learning features
+  - target 也统一成 future-based 定义
+  - 目的是修正旧任务定义“会反应但不够可学”的问题
+
 ---
 
 ## 2. 这个模型要解决什么问题
@@ -103,7 +113,7 @@ self_aware_slam/configs/config.yaml
 
 这些原始工程指标再被整理成模型真正吃的 **7 个 canonical features**。
 
-### 3.2 当前 7 个 canonical features
+### 3.2 当前 runtime 的 7 个 canonical features
 
 当前模型使用的 7 个特征是：
 
@@ -171,6 +181,45 @@ self_aware_slam/src/data/feature_engineering.py
 > 主 VIO 的指标命名，和 self-aware 训练时代码使用的字段命名，并不是天然一致的。
 
 所以当前项目能跑通，不是因为两个工程天生兼容，而是因为做了这一层特征桥接。
+
+### 4.1 v2 为什么不再只用这 7 个特征
+
+当前 runtime 的 7 个特征更偏：
+
+- 当前状态诊断
+- 同步质量监控
+
+但如果目标是预测“接下来会不会坏、接下来最坏会坏到什么程度”，光靠同步量不够。
+
+所以 v2 训练路径新增了 15 个趋势特征，重点补的是：
+
+- `delta_*`
+- `rolling_mean_*`
+- `rolling_std_*`
+- `slope_*`
+
+现在 v2 训练总维度是：
+
+- `22` 维
+
+它不是为了让 online demo 更复杂，而是为了让训练任务本身更可学。
+
+### 4.2 v2 当前 target 是什么
+
+v2 不再混用 current failure 和 predictive failure。
+
+当前统一成：
+
+- regression target:
+  `future_max_pose_error` over next `10` frames
+- classification target:
+  `future_max_pose_error > 0.18m` or future tracking lost
+
+这比旧版更干净，因为：
+
+- train / val / test 语义一致
+- regression / classification 围绕同一个 future target
+- 不再出现 train 学当前失败、eval 看未来失败的错位
 
 ---
 

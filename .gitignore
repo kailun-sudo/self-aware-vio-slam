@@ -41,4 +41,5 @@ self_aware_slam/.claude/
 
 # Large training artifacts not required for source release
 self_aware_slam/results/train_dataset.pkl
+self_aware_slam/results/train_dataset_v2.pkl
 self_aware_slam_legacy/results/train_dataset.pkl

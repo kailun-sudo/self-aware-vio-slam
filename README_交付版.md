@@ -181,6 +181,19 @@ outputs/multisequence_degradation_grid/model_validity/
 └── calibration_t3p0.png
 ```
 
+v2 训练数据输出：
+
+```text
+self_aware_slam/results/
+└── train_dataset_v2.pkl
+```
+
+这份 v2 数据集的定义已经和旧版训练缓存分开：
+
+- 输入：22 维 trend-aware learning features
+- 回归目标：未来 10 帧内的 `future_max_pose_error`
+- 分类目标：`future_max_pose_error > 0.18m` 或未来 tracking lost
+
 ## 最小运行流程
 
 ### 1. 跑主 SLAM
@@ -225,6 +238,25 @@ cd /Users/kailunwang/Desktop/ossa
   --sequence-name MH_01_unified \
   --dataset-root /Users/kailunwang/Desktop/ossa/self_aware_slam/slam_metrics_dataset
 ```
+
+### 5. 构建 v2 训练数据集
+
+```bash
+cd /Users/kailunwang/Desktop/ossa/self_aware_slam
+./venv/bin/python -m src.data.dataset_builder
+```
+
+当前这一步会生成：
+
+- `self_aware_slam/results/train_dataset_v2.pkl`
+
+并且已经验证过：
+
+- `window_size = 10`
+- `feature_dim = 22`
+- `train failure rate ≈ 8.4%`
+- `val failure rate ≈ 18.9%`
+- `test failure rate ≈ 19.2%`
 
 ## 批量运行
 
@@ -285,12 +317,14 @@ bash /Users/kailunwang/Desktop/ossa/integration/run_batch_unified_pipeline.sh \
 - 多序列批处理入口
 - 跨序列 benchmark 表和 severity 网格 sweep
 - 模型 validity benchmark（相关性 / ROC / 校准 / heuristic 对比）
+- v2 self-awareness 训练数据路径（统一 future target + trend-aware features）
 
 ## 当前限制
 
 - 当前主 SLAM 是 notebook-derived 纯 Python VIO，不是完整 C++ ORB-SLAM3
 - self-aware 模型已能接入，但还存在域偏移，结果可用于系统展示，不适合当成最终精度结论
 - 当前 validity benchmark 已说明：模型目前“有反应”，但“还没有被证明是对的”
+- 因此仓库里已经新增 v2 训练线，用统一 future target 和 22 维 trend-aware features 来替换旧任务定义
 - 当前主集成是离线式，不是在线每帧推理
 - 当前公开 benchmark 已覆盖 `MH_01 ~ MH_05`，但 `V1 / V2` 还未纳入同一套公开 sweep
 

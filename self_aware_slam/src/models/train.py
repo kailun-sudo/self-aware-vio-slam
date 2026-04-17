@@ -164,7 +164,10 @@ def train(config: dict):
     print(f"Using device: {device}")
 
     # Load or build dataset
-    dataset_path = os.path.join(config['paths']['results_dir'], 'train_dataset.pkl')
+    dataset_path = config['paths'].get(
+        'train_dataset_path',
+        os.path.join(config['paths']['results_dir'], 'train_dataset_v2.pkl'),
+    )
     if os.path.exists(dataset_path):
         print(f"Loading dataset from {dataset_path}")
         dataset = load_dataset(dataset_path)
@@ -183,8 +186,19 @@ def train(config: dict):
     print(f"Val:   {len(dataset['val']['X'])} samples")
     print(f"Test:  {len(dataset['test']['X'])} samples")
 
+    resolved_config = json.loads(json.dumps(config))
+    resolved_config.setdefault('features', {})
+    resolved_config['features']['model_names'] = dataset.get(
+        'feature_names',
+        resolved_config['features']['names'],
+    )
+
     # Model
-    model = build_model(config).to(device)
+    model = build_model(
+        resolved_config,
+        n_features=dataset['train']['X'].shape[-1],
+        window_size=dataset.get('window_size', config['temporal']['window_size']),
+    ).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"\nModel: {config['model']['type']} ({n_params:,} parameters)")
 
@@ -251,7 +265,7 @@ def train(config: dict):
     model_path = os.path.join(model_dir, f"{config['model']['type']}_failure_predictor.pt")
     torch.save({
         'model_state_dict': model.state_dict(),
-        'config': config,
+        'config': resolved_config,
         'test_metrics': test_metrics,
         'test_mae': test_mae,
         'history': history,

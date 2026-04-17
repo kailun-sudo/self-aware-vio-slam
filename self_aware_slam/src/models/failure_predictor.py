@@ -197,7 +197,7 @@ class FailureTransformer(nn.Module):
         return failure_prob, pred_error
 
 
-def build_model(config: dict) -> nn.Module:
+def build_model(config: dict, n_features: int = None, window_size: int = None) -> nn.Module:
     """Factory function to build model from config.
 
     Args:
@@ -207,8 +207,11 @@ def build_model(config: dict) -> nn.Module:
         PyTorch model
     """
     model_type = config['model']['type']
-    n_features = len(config['features']['names'])
-    window_size = config['temporal']['window_size']
+    if n_features is None:
+        feature_names = config['features'].get('model_names', config['features']['names'])
+        n_features = len(feature_names)
+    if window_size is None:
+        window_size = config['temporal']['window_size']
 
     if model_type == 'mlp':
         mc = config['model']['mlp']
