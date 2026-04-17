@@ -232,6 +232,24 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 
 这一步的作用不是跑 demo，而是为后续重新训练一个更合理的 self-aware predictor 做准备。
 
+### 5.3 用新 checkpoint 跑推理 / benchmark
+
+如果你训练出了新的 v2 checkpoint，不需要替换仓库默认 runtime 模型，也可以直接通过参数显式指定：
+
+```bash
+/Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
+  /Users/kailunwang/Desktop/ossa/integration/run_offline_unified_demo.py \
+  --metrics /Users/kailunwang/Desktop/ossa/outputs/mh01/slam_metrics.csv \
+  --estimated /Users/kailunwang/Desktop/ossa/outputs/mh01/estimated_tum.txt \
+  --groundtruth /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/mav0/state_groundtruth_estimate0/data.csv \
+  --output-dir /Users/kailunwang/Desktop/ossa/outputs/mh01_self_aware_v2 \
+  --config /Users/kailunwang/Desktop/ossa/self_aware_slam/configs/config.yaml \
+  --checkpoint /Users/kailunwang/Desktop/ossa/self_aware_slam/results/models/transformer_failure_predictor.pt \
+  --dataset-stats /Users/kailunwang/Desktop/ossa/self_aware_slam/results/train_dataset_v2.pkl
+```
+
+同样，多序列 degradation sweep 也支持这两个参数，所以你可以用新模型重跑完整 benchmark，而不是继续评估旧 checkpoint。
+
 ## 6. 第二步：运行 unified demo
 
 回到工作区根目录：

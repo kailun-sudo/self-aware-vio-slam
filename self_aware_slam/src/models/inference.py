@@ -15,11 +15,27 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.data.dataset_builder import load_dataset
-from src.data.feature_engineering import FEATURE_COLUMNS, extract_features, normalize_features
+from src.data.feature_engineering import (
+    FEATURE_COLUMNS,
+    extract_features,
+    extract_learning_features,
+    normalize_features,
+)
 from src.models.failure_predictor import build_model
 from src.utils.config_loader import load_config
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+
+def _extract_features_for_model(metrics_df: pd.DataFrame, feature_names: List[str], config: Dict) -> np.ndarray:
+    """Support both legacy runtime features and v2 learning features."""
+    if all(name in FEATURE_COLUMNS for name in feature_names):
+        return extract_features(metrics_df, feature_columns=feature_names)
+    return extract_learning_features(
+        metrics_df,
+        feature_columns=feature_names,
+        rolling_window=config['features'].get('rolling_window', 5),
+    )
 
 
 def _create_inference_windows(features: np.ndarray, window_size: int) -> np.ndarray:
@@ -110,6 +126,7 @@ class OnlinePredictorRuntime:
         self.norm_stats = runtime_stats['norm_stats']
         self.feature_names = runtime_stats.get('feature_names', FEATURE_COLUMNS)
         self.window_size = runtime_stats.get('window_size', checkpoint_config['temporal']['window_size'])
+        self.feature_config = checkpoint_config.get('features', {})
         self.buffer: List[Dict] = []
 
         self.device = torch.device(
@@ -128,7 +145,7 @@ class OnlinePredictorRuntime:
             return None
 
         window_df = pd.DataFrame(self.buffer[-self.window_size:])
-        features = extract_features(window_df, feature_columns=self.feature_names)
+        features = _extract_features_for_model(window_df, self.feature_names, {'features': self.feature_config})
         features_norm = normalize_features(features, self.norm_stats)
         window = np.expand_dims(features_norm[-self.window_size:], axis=0).astype(np.float32)
 
@@ -178,7 +195,7 @@ def run_inference(
     window_size = runtime_stats.get('window_size', checkpoint_config['temporal']['window_size'])
 
     metrics_df = pd.read_csv(metrics_path)
-    features = extract_features(metrics_df, feature_columns=feature_names)
+    features = _extract_features_for_model(metrics_df, feature_names, checkpoint_config)
     features_norm = normalize_features(features, norm_stats)
     windows = _create_inference_windows(features_norm, window_size)
 

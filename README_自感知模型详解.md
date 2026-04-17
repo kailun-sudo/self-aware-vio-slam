@@ -221,6 +221,28 @@ v2 不再混用 current failure 和 predictive failure。
 - regression / classification 围绕同一个 future target
 - 不再出现 train 学当前失败、eval 看未来失败的错位
 
+### 4.3 v2 checkpoint 现在也能走统一推理入口
+
+现在 `src/models/inference.py` 已经同时支持两类 checkpoint：
+
+- 旧版 runtime checkpoint（7 维输入）
+- v2 checkpoint（22 维 trend-aware learning features）
+
+区别不靠手工改代码，而是靠：
+
+- `--checkpoint`
+- `--dataset-stats`
+
+这两个参数显式指定。
+
+也就是说，后面你训练出新的 v2 模型后，可以直接把它接到：
+
+- `run_offline_unified_demo.py`
+- `run_multisequence_degradation_sweep.py`
+- `run_model_validity_benchmark.py` 的上游输出链
+
+不需要再单独维护一套新的推理脚本。
+
 ---
 
 ## 5. 为什么不是单帧预测，而是时间窗
