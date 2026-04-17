@@ -316,6 +316,28 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 - 不再是 train 学 current failure、eval 看 predictive failure 那种错位设置
 - train 现在也真正看到了 degraded replay 里的 failure 模式
 
+现在训练脚本也已经支持 `--dataset-path`，所以你不用再手改 `config.yaml`：
+
+开发版训练：
+
+```bash
+cd /Users/kailunwang/Desktop/ossa/self_aware_slam
+./venv/bin/python -m src.models.train \
+  --config configs/config.yaml \
+  --model transformer \
+  --dataset-path results/train_dataset_v2.pkl
+```
+
+严格 held-out 训练：
+
+```bash
+cd /Users/kailunwang/Desktop/ossa/self_aware_slam
+./venv/bin/python -m src.models.train \
+  --config configs/config.yaml \
+  --model transformer \
+  --dataset-path results/train_dataset_v2_sequence_held_out.pkl
+```
+
 ### Step 2：跑 unified demo
 
 命令：

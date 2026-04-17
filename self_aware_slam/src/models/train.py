@@ -13,6 +13,7 @@ Performs:
 
 Usage:
     python -m src.models.train --config configs/config.yaml
+    python -m src.models.train --config configs/config.yaml --dataset-path results/train_dataset_v2_sequence_held_out.pkl
 """
 
 import torch
@@ -156,7 +157,7 @@ def make_dataloader(split_data: dict, batch_size: int, shuffle: bool = True):
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
 
 
-def train(config: dict):
+def train(config: dict, dataset_path_override: str | None = None):
     """Main training loop."""
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else
@@ -164,10 +165,11 @@ def train(config: dict):
     print(f"Using device: {device}")
 
     # Load or build dataset
-    dataset_path = config['paths'].get(
+    dataset_path = dataset_path_override or config['paths'].get(
         'train_dataset_path',
         os.path.join(config['paths']['results_dir'], 'train_dataset_v2.pkl'),
     )
+    print(f"Training dataset path: {dataset_path}")
     if os.path.exists(dataset_path):
         print(f"Loading dataset from {dataset_path}")
         dataset = load_dataset(dataset_path)
@@ -294,13 +296,19 @@ def main():
     parser.add_argument('--config', type=str, default=None)
     parser.add_argument('--model', type=str, choices=['mlp', 'lstm', 'transformer'],
                         default=None, help='Override model type from config')
+    parser.add_argument(
+        '--dataset-path',
+        type=str,
+        default=None,
+        help='Override train dataset path from config',
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
     if args.model:
         config['model']['type'] = args.model
 
-    train(config)
+    train(config, dataset_path_override=args.dataset_path)
 
 
 if __name__ == '__main__':

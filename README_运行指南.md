@@ -296,6 +296,39 @@ builder 现在还会额外写出 diagnostics：
 
 这一步的作用不是跑 demo，而是为后续重新训练一个更合理的 self-aware predictor 做准备。
 
+### 5.2.1 直接训练开发版模型
+
+现在训练脚本已经支持 `--dataset-path`，不需要再手改 `config.yaml`。
+
+开发版模型：
+
+```bash
+cd /Users/kailunwang/Desktop/ossa/self_aware_slam
+./venv/bin/python -m src.models.train \
+  --config configs/config.yaml \
+  --model transformer \
+  --dataset-path results/train_dataset_v2.pkl
+```
+
+### 5.2.2 直接训练严格跨 sequence 模型
+
+严格 held-out 模型：
+
+```bash
+cd /Users/kailunwang/Desktop/ossa/self_aware_slam
+./venv/bin/python -m src.models.train \
+  --config configs/config.yaml \
+  --model transformer \
+  --dataset-path results/train_dataset_v2_sequence_held_out.pkl
+```
+
+建议训练完马上另存 checkpoint，避免覆盖默认文件：
+
+```bash
+cp /Users/kailunwang/Desktop/ossa/self_aware_slam/results/models/transformer_failure_predictor.pt \
+   /Users/kailunwang/Desktop/ossa/self_aware_slam/results/models/transformer_failure_predictor_v2_sequence_held_out.pt
+```
+
 ### 5.3 用新 checkpoint 跑推理 / benchmark
 
 如果你训练出了新的 v2 checkpoint，不需要替换仓库默认 runtime 模型，也可以直接通过参数显式指定：

@@ -169,6 +169,26 @@ The v2 dataset differs from the currently deployed runtime model in two ways:
 - the default split protocol is **`family_aware_dev`**; use `--split-protocol sequence_held_out` for a strict cross-sequence benchmark dataset
 - the default `prediction_horizon` is now **5**, which retains the public `MH_04/MH_05` degraded replay runs and writes dataset diagnostics (`y_error` histograms + retained-run summaries)
 
+Train directly on the default dev dataset:
+
+```bash
+cd self_aware_slam
+./venv/bin/python -m src.models.train \
+  --config configs/config.yaml \
+  --model transformer \
+  --dataset-path results/train_dataset_v2.pkl
+```
+
+Train directly on the strict held-out dataset:
+
+```bash
+cd self_aware_slam
+./venv/bin/python -m src.models.train \
+  --config configs/config.yaml \
+  --model transformer \
+  --dataset-path results/train_dataset_v2_sequence_held_out.pkl
+```
+
 Validate whether the currently deployed predictor is actually aligned with real pose error:
 
 ```bash
@@ -194,6 +214,7 @@ The original Chinese documentation is intentionally kept unchanged for internal 
 - [README_运行指南.md](README_运行指南.md)
 - [README_教学指南.md](README_教学指南.md)
 - [README_自感知模型详解.md](README_自感知模型详解.md)
+- [README_修复与试错记录.md](README_修复与试错记录.md)
 - [README_交付版.md](README_交付版.md)
 
 ## Current Scope
