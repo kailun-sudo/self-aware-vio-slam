@@ -38,6 +38,7 @@ EuRoC mav0
 - EuRoC playback with controllable camera / IMU degradation injection
 - Baseline-vs-degraded comparison GUI for self-awareness stress testing
 - Multi-sequence degradation sweep with composite scenarios, severity grids, benchmark tables, and interactive HTML report
+- Model validity benchmark with correlation, ROC, calibration, and heuristic comparisons
 - Packaging of unified runs into reusable training-ready sequences
 
 ## Demo Screenshots
@@ -146,12 +147,31 @@ The aggregate report also writes stable benchmark tables:
 - `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.csv`
 - `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.md`
 
+Validate whether the learned predictor is actually aligned with real pose error:
+
+```bash
+self_aware_slam/venv/bin/python integration/run_model_validity_benchmark.py \
+  --sweep-results outputs/multisequence_degradation_grid/sweep_results.csv \
+  --output-dir outputs/multisequence_degradation_grid/model_validity \
+  --failure-thresholds 0.3,1.0,3.0 \
+  --summary-threshold 3.0
+```
+
+This produces:
+
+- `outputs/multisequence_degradation_grid/model_validity/validity_summary.txt`
+- `outputs/multisequence_degradation_grid/model_validity/threshold_metrics.csv`
+- `outputs/multisequence_degradation_grid/model_validity/run_level_correlations.csv`
+- `outputs/multisequence_degradation_grid/model_validity/sequence_validity_summary.csv`
+- `outputs/multisequence_degradation_grid/model_validity/scenario_validity_summary.csv`
+
 ## Documentation
 
 The original Chinese documentation is intentionally kept unchanged for internal use:
 
 - [README_运行指南.md](README_运行指南.md)
 - [README_教学指南.md](README_教学指南.md)
+- [README_自感知模型详解.md](README_自感知模型详解.md)
 - [README_交付版.md](README_交付版.md)
 
 ## Current Scope

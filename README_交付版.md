@@ -83,6 +83,10 @@ VIO-SLAM/run_pipeline.py
 - `create_multisequence_degradation_report.py`
   - 跨序列汇总报告与总 GUI
 
+- `run_model_validity_benchmark.py`
+  - 模型有效性验证
+  - 相关性 / ROC / 校准 / heuristic 对比
+
 ## 当前系统输入输出
 
 ### 输入
@@ -159,6 +163,24 @@ outputs/multisequence_degradation_grid/
     └── visual_demo.html
 ```
 
+Model validity benchmark 输出：
+
+```text
+outputs/multisequence_degradation_grid/model_validity/
+├── frame_level_validity_data.csv
+├── run_level_correlations.csv
+├── sequence_validity_summary.csv
+├── scenario_validity_summary.csv
+├── threshold_metrics.csv
+├── validity_summary.txt
+├── model_vs_actual_scatter.png
+├── sequence_correlation_overview.png
+├── roc_comparison_t1p0.png
+├── roc_comparison_t3p0.png
+├── calibration_t1p0.png
+└── calibration_t3p0.png
+```
+
 ## 最小运行流程
 
 ### 1. 跑主 SLAM
@@ -226,6 +248,17 @@ bash /Users/kailunwang/Desktop/ossa/integration/run_batch_unified_pipeline.sh \
   --output-root /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_grid
 ```
 
+如果你要进一步验证“模型到底对不对”，继续跑：
+
+```bash
+/Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
+  /Users/kailunwang/Desktop/ossa/integration/run_model_validity_benchmark.py \
+  --sweep-results /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_grid/sweep_results.csv \
+  --output-dir /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_grid/model_validity \
+  --failure-thresholds 0.3,1.0,3.0 \
+  --summary-threshold 3.0
+```
+
 目录约定是：
 
 ```text
@@ -251,11 +284,13 @@ bash /Users/kailunwang/Desktop/ossa/integration/run_batch_unified_pipeline.sh \
 - 训练序列打包
 - 多序列批处理入口
 - 跨序列 benchmark 表和 severity 网格 sweep
+- 模型 validity benchmark（相关性 / ROC / 校准 / heuristic 对比）
 
 ## 当前限制
 
 - 当前主 SLAM 是 notebook-derived 纯 Python VIO，不是完整 C++ ORB-SLAM3
 - self-aware 模型已能接入，但还存在域偏移，结果可用于系统展示，不适合当成最终精度结论
+- 当前 validity benchmark 已说明：模型目前“有反应”，但“还没有被证明是对的”
 - 当前主集成是离线式，不是在线每帧推理
 - 当前公开 benchmark 已覆盖 `MH_01 ~ MH_05`，但 `V1 / V2` 还未纳入同一套公开 sweep
 

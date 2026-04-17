@@ -513,3 +513,63 @@ bash /Users/kailunwang/Desktop/ossa/integration/run_linux_vm_pipeline.sh \
 - 平均 `failure delta` 最大场景：`blur_bias_s45`
 - 平均 `pose error delta` 最大场景：`noise_amp_s45`
 - 平均看，`MH_05` 对 `failure/confidence` 变化最敏感，`MH_04`、`MH_05` 的脆弱性高于前 3 条 easy/medium 序列
+
+## 14. Model Validity Benchmark
+
+如果你现在要回答的问题不是“模型会不会动”，而是“模型到底准不准”，就跑这一步。
+
+这个 benchmark 直接建立在多序列 sweep 结果上，不需要重跑主 VIO，只会读取每个 run 的：
+
+- `reliability_predictions.csv`
+- `slam_metrics.csv`
+- `actual_pose_error`
+
+然后输出：
+
+- `failure_probability` 和真实 `pose_error` 的 Pearson / Spearman 相关性
+- `predicted_pose_error` 和真实 `pose_error` 的相关性
+- 多个 failure threshold 下的 ROC-AUC / AP / F1
+- 概率校准图
+- 和简单 heuristic（如 `inlier_ratio`、`pose_optimization_residual`、`num_inliers`、`mean_epipolar_error`）的对比
+
+运行命令：
+
+```bash
+/Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
+  /Users/kailunwang/Desktop/ossa/integration/run_model_validity_benchmark.py \
+  --sweep-results /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_grid/sweep_results.csv \
+  --output-dir /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_grid/model_validity \
+  --failure-thresholds 0.3,1.0,3.0 \
+  --summary-threshold 3.0
+```
+
+关键输出：
+
+- `outputs/multisequence_degradation_grid/model_validity/validity_summary.txt`
+- `outputs/multisequence_degradation_grid/model_validity/threshold_metrics.csv`
+- `outputs/multisequence_degradation_grid/model_validity/run_level_correlations.csv`
+- `outputs/multisequence_degradation_grid/model_validity/sequence_validity_summary.csv`
+- `outputs/multisequence_degradation_grid/model_validity/scenario_validity_summary.csv`
+- `outputs/multisequence_degradation_grid/model_validity/model_vs_actual_scatter.png`
+- `outputs/multisequence_degradation_grid/model_validity/sequence_correlation_overview.png`
+- `outputs/multisequence_degradation_grid/model_validity/roc_comparison_t1p0.png`
+- `outputs/multisequence_degradation_grid/model_validity/roc_comparison_t3p0.png`
+- `outputs/multisequence_degradation_grid/model_validity/calibration_t1p0.png`
+- `outputs/multisequence_degradation_grid/model_validity/calibration_t3p0.png`
+
+当前这轮 benchmark 的第一版结论：
+
+- 全局 `failure_probability` vs `actual_pose_error` Pearson 只有约 `-0.010`
+- 全局 `predicted_pose_error` vs `actual_pose_error` Pearson 只有约 `-0.028`
+- 在 `3.0m` failure threshold 下，`model_failure_probability` 的 ROC-AUC 约 `0.511`
+- 同一阈值下，最好 heuristic `heuristic_epipolar_error_risk` 的 ROC-AUC 约 `0.542`
+
+这说明：
+
+- 模型目前**对退化有反应**
+- 但还**没有证明它稳定地预测了真实误差**
+
+也就是说，现在更准确的结论是：
+
+- “model reacts”
+- 不是 “model is already valid”

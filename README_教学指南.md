@@ -2,6 +2,10 @@
 
 这份文档不是简单的命令清单，而是带你**理解整条 unified pipeline 链路**。
 
+如果你现在想单独把 self-aware 预测模型看透，直接配合这份文档一起看：
+
+- `README_自感知模型详解.md`
+
 你现在手上的系统已经不是两个分离项目，而是一条完整的数据流：
 
 1. `VIO-SLAM` 读取 EuRoC `mav0`
@@ -529,6 +533,82 @@ head -n 20 /Users/kailunwang/Desktop/ossa/outputs/mh01_self_aware/reliability_pr
 - `V2_*`
 
 把 benchmark 从 `Machine Hall only` 扩到 `cross-room / cross-motion regime`。
+
+### 但这里有一个非常关键的区分
+
+做到 multi-sequence sweep 以后，你已经能证明：
+
+- 模型对退化有反应
+- 风险分数、confidence 和 tracking 指标会跟着变化
+
+但这**还不等于**证明模型真的预测对了。
+
+因为一个模型可能：
+
+- 对退化很敏感
+- 输出变化很明显
+
+但它和真实 `pose_error` 的关系仍然不稳定。
+
+这就是为什么我又补了这条专门的 benchmark：
+
+```text
+/Users/kailunwang/Desktop/ossa/integration/run_model_validity_benchmark.py
+```
+
+它要回答的问题不是：
+
+- “模型有没有动？”
+
+而是：
+
+- “模型的输出到底和真实误差有没有稳定对应关系？”
+- “它比简单 heuristic 强不强？”
+- “这个 failure probability 有没有概率意义？”
+
+### 这条 validity benchmark 会看什么
+
+它主要看 4 类证据：
+
+1. **相关性**
+   - `failure_probability` vs `actual_pose_error`
+   - `predicted_pose_error` vs `actual_pose_error`
+
+2. **二分类有效性**
+   - 把真实 `pose_error` 过阈值当 failure label
+   - 看 ROC-AUC / AP / F1
+
+3. **校准**
+   - 看 `failure_probability` 和真实失败率是否对得上
+
+4. **heuristic 对比**
+   - 和 `inlier_ratio`
+   - `pose_optimization_residual`
+   - `num_inliers`
+   - `mean_epipolar_error`
+   做对比
+
+### 当前第一版 validity benchmark 的结论
+
+目前这套系统的结论是：
+
+- 模型**有反应**
+- 但**还没有被证明是对的**
+
+原因很直接：
+
+- 全局 `failure_probability` 和 `actual_pose_error` 的相关性接近 `0`
+- 全局 `predicted_pose_error` 和 `actual_pose_error` 的相关性也接近 `0`
+- 在 `3.0m` failure threshold 下，模型的 ROC-AUC 只有大约 `0.51`
+- 最好的简单 heuristic 反而能到大约 `0.54`
+
+所以这一步很重要，因为它把结论从：
+
+- “系统做出来了”
+
+推进到：
+
+- “我们现在知道模型哪里还没站住”
 
 ### `pose_errors.csv`
 
