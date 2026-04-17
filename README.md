@@ -37,7 +37,7 @@ EuRoC mav0
 - Interactive local GUI demo for trajectory risk playback
 - EuRoC playback with controllable camera / IMU degradation injection
 - Baseline-vs-degraded comparison GUI for self-awareness stress testing
-- Multi-sequence degradation sweep with aggregate summary and interactive HTML report
+- Multi-sequence degradation sweep with composite scenarios, severity grids, benchmark tables, and interactive HTML report
 - Packaging of unified runs into reusable training-ready sequences
 
 ## Demo Screenshots
@@ -122,21 +122,29 @@ Then open:
 outputs/euroc_degradation_quick/comparison/gui/visual_demo.html
 ```
 
-Run a representative multi-sequence sweep across several EuRoC sequences:
+Run a representative multi-sequence sweep across five EuRoC Machine Hall sequences:
 
 ```bash
 self_aware_slam/venv/bin/python integration/run_multisequence_degradation_sweep.py \
   --dataset-root VIO-SLAM/data/sequences \
-  --sequences MH_01_easy,MH_02_easy,MH_03_medium \
-  --scenarios blur_bias,noise_amp,lighting_dropout \
-  --output-root outputs/multisequence_degradation_sweep
+  --sequences MH_01_easy,MH_02_easy,MH_03_medium,MH_04_difficult,MH_05_difficult \
+  --scenarios blur_bias,noise_amp,lighting_dropout,dropout_bias \
+  --severity-grid 0.45,0.70 \
+  --output-root outputs/multisequence_degradation_grid
 ```
 
 Then open:
 
 ```text
-outputs/multisequence_degradation_sweep/report/visual_demo.html
+outputs/multisequence_degradation_grid/report/visual_demo.html
 ```
+
+The aggregate report also writes stable benchmark tables:
+
+- `outputs/multisequence_degradation_grid/report/benchmark_runs.csv`
+- `outputs/multisequence_degradation_grid/report/benchmark_scenario_severity.csv`
+- `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.csv`
+- `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.md`
 
 ## Documentation
 

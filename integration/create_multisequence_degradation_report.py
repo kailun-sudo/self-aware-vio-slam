@@ -23,6 +23,69 @@ import numpy as np
 import pandas as pd
 
 
+def _to_markdown_table(frame: pd.DataFrame) -> str:
+    headers = list(frame.columns)
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(["---"] * len(headers)) + " |",
+    ]
+    for _, row in frame.iterrows():
+        values = [str(row[column]) for column in headers]
+        lines.append("| " + " | ".join(values) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def _write_benchmark_tables(results: pd.DataFrame, output_dir: Path):
+    benchmark_columns = [
+        "sequence_short",
+        "base_scenario",
+        "scenario",
+        "camera_degradation",
+        "imu_degradation",
+        "severity",
+        "failure_probability_mean_delta",
+        "confidence_mean_delta",
+        "pose_error_mean_delta",
+        "mean_inlier_ratio_delta",
+    ]
+    available = [column for column in benchmark_columns if column in results.columns]
+    run_table = results[available].sort_values(
+        ["sequence_short", "base_scenario", "severity"], na_position="last"
+    )
+    run_table.to_csv(output_dir / "benchmark_runs.csv", index=False)
+
+    scenario_benchmark = (
+        results.groupby(["base_scenario", "severity"], dropna=False)[
+            [
+                "failure_probability_mean_delta",
+                "confidence_mean_delta",
+                "pose_error_mean_delta",
+                "mean_inlier_ratio_delta",
+            ]
+        ]
+        .mean(numeric_only=True)
+        .reset_index()
+        .sort_values(["base_scenario", "severity"])
+    )
+    scenario_benchmark.to_csv(output_dir / "benchmark_scenario_severity.csv", index=False)
+
+    failure_pivot = (
+        results.pivot_table(
+            index="sequence_short",
+            columns="scenario",
+            values="failure_probability_mean_delta",
+            aggfunc="mean",
+        )
+        .reset_index()
+        .sort_values("sequence_short")
+    )
+    failure_pivot.to_csv(output_dir / "benchmark_failure_delta_pivot.csv", index=False)
+    (output_dir / "benchmark_failure_delta_pivot.md").write_text(
+        _to_markdown_table(failure_pivot.fillna("—")),
+        encoding="utf-8",
+    )
+
+
 def _write_summary(results: pd.DataFrame, output_dir: Path):
     summary_path = output_dir / "multi_sequence_summary.txt"
     scenario_group = (
@@ -51,11 +114,18 @@ def _write_summary(results: pd.DataFrame, output_dir: Path):
     )
     scenario_group.to_csv(output_dir / "scenario_aggregate.csv", index=False)
     sequence_group.to_csv(output_dir / "sequence_aggregate.csv", index=False)
+    _write_benchmark_tables(results, output_dir)
 
     with open(summary_path, "w", encoding="utf-8") as handle:
         handle.write("Multi-sequence degradation sweep summary\n")
         handle.write(f"num_sequences: {results['sequence'].nunique()}\n")
         handle.write(f"num_scenarios: {results['scenario'].nunique()}\n")
+        if "base_scenario" in results.columns:
+            handle.write(f"num_base_scenarios: {results['base_scenario'].nunique()}\n")
+            handle.write(f"base_scenarios: {','.join(sorted(results['base_scenario'].unique()))}\n")
+        if "severity" in results.columns:
+            severities = ",".join(f"{value:.2f}" for value in sorted(results["severity"].dropna().unique()))
+            handle.write(f"severity_grid: {severities}\n")
         handle.write(f"num_runs: {len(results)}\n")
         handle.write(f"sequences: {','.join(sorted(results['sequence'].unique()))}\n")
         handle.write(f"scenarios: {','.join(sorted(results['scenario'].unique()))}\n\n")
@@ -217,7 +287,7 @@ def _write_html(results: pd.DataFrame, output_dir: Path):
     .value {{ font-size: 1.6rem; font-weight: 700; }}
     .controls {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 12px;
       align-items: end;
     }}
@@ -291,6 +361,10 @@ def _write_html(results: pd.DataFrame, output_dir: Path):
           <select id="scenarioFilter"></select>
         </div>
         <div>
+          <label for="severityFilter">Severity</label>
+          <select id="severityFilter"></select>
+        </div>
+        <div>
           <label for="cameraFilter">Camera Degradation</label>
           <select id="cameraFilter"></select>
         </div>
@@ -330,6 +404,7 @@ def _write_html(results: pd.DataFrame, output_dir: Path):
     const filters = {{
       sequence: document.getElementById('sequenceFilter'),
       scenario: document.getElementById('scenarioFilter'),
+      severity: document.getElementById('severityFilter'),
       camera: document.getElementById('cameraFilter'),
       imu: document.getElementById('imuFilter'),
     }};
@@ -368,6 +443,7 @@ def _write_html(results: pd.DataFrame, output_dir: Path):
         return (
           (filters.sequence.value === 'All' || row.sequence_short === filters.sequence.value) &&
           (filters.scenario.value === 'All' || row.scenario === filters.scenario.value) &&
+          (filters.severity.value === 'All' || Number(row.severity).toFixed(2) === filters.severity.value) &&
           (filters.camera.value === 'All' || row.camera_degradation === filters.camera.value) &&
           (filters.imu.value === 'All' || row.imu_degradation === filters.imu.value)
         );
@@ -394,6 +470,7 @@ def _write_html(results: pd.DataFrame, output_dir: Path):
 
     populateSelect(filters.sequence, uniqueValues('sequence_short'));
     populateSelect(filters.scenario, uniqueValues('scenario'));
+    populateSelect(filters.severity, ['All'].concat([...new Set(rows.map((row) => Number(row.severity).toFixed(2)).filter(Boolean))].sort()));
     populateSelect(filters.camera, uniqueValues('camera_degradation'));
     populateSelect(filters.imu, uniqueValues('imu_degradation'));
     Object.values(filters).forEach((select) => select.addEventListener('change', renderTable));

@@ -8,9 +8,8 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
-import sys
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 import pandas as pd
 
@@ -93,6 +92,33 @@ def _normalize_name(sequence: str) -> str:
         "V2_03_difficult": "V2_03",
     }
     return mapping.get(sequence, sequence)
+
+
+def _severity_slug(severity: float) -> str:
+    return f"s{int(round(severity * 100)):02d}"
+
+
+def _build_scenario_instances(
+    scenario_names: List[str],
+    severity_grid: List[float],
+) -> List[Dict[str, object]]:
+    instances: List[Dict[str, object]] = []
+    for base_name in scenario_names:
+        preset = SCENARIO_PRESETS[base_name]
+        severities = severity_grid or [float(preset["severity"])]
+        for severity in severities:
+            scenario_slug = base_name if not severity_grid else f"{base_name}_{_severity_slug(severity)}"
+            instances.append(
+                {
+                    "base_scenario": base_name,
+                    "scenario_slug": scenario_slug,
+                    "camera_degradation": preset["camera_degradation"],
+                    "imu_degradation": preset.get("imu_degradation"),
+                    "severity": float(severity),
+                    "description": f"{preset['description']} (severity={float(severity):.2f})",
+                }
+            )
+    return instances
 
 
 def _ensure_baseline(
@@ -262,6 +288,7 @@ def _run_scenario(
         return {
             "sequence": sequence,
             "scenario": scenario_name,
+            "base_scenario": scenario["base_scenario"],
             "camera_degradation": scenario["camera_degradation"],
             "imu_degradation": scenario.get("imu_degradation") or "none",
             "severity": scenario["severity"],
@@ -277,6 +304,7 @@ def _run_scenario(
         "sequence": sequence,
         "sequence_short": _normalize_name(sequence),
         "scenario": scenario_name,
+        "base_scenario": scenario["base_scenario"],
         "camera_degradation": scenario["camera_degradation"],
         "imu_degradation": scenario.get("imu_degradation") or "none",
         "severity": scenario["severity"],
@@ -312,8 +340,22 @@ def _run_scenario(
 def main():
     parser = argparse.ArgumentParser(description="Run a representative multi-sequence degradation sweep")
     parser.add_argument("--dataset-root", type=str, default=str(VIO_ROOT / "data" / "sequences"))
-    parser.add_argument("--sequences", type=str, default="MH_01_easy,MH_02_easy,MH_03_medium")
-    parser.add_argument("--scenarios", type=str, default="blur_bias,noise_amp,lighting_dropout")
+    parser.add_argument(
+        "--sequences",
+        type=str,
+        default="MH_01_easy,MH_02_easy,MH_03_medium,MH_04_difficult,MH_05_difficult",
+    )
+    parser.add_argument(
+        "--scenarios",
+        type=str,
+        default="blur_bias,noise_amp,lighting_dropout,dropout_bias",
+    )
+    parser.add_argument(
+        "--severity-grid",
+        type=str,
+        default="",
+        help="Optional comma-separated severity override grid, e.g. 0.45,0.65",
+    )
     parser.add_argument("--output-root", type=str, default=str(ROOT_DIR / "outputs" / "multisequence_degradation_sweep"))
     parser.add_argument("--vio-python", type=str, default=str(VIO_ROOT / ".venv" / "bin" / "python"))
     parser.add_argument("--self-aware-python", type=str, default=str(SELF_AWARE_ROOT / "venv" / "bin" / "python"))
@@ -333,10 +375,17 @@ def main():
 
     sequences = [item.strip() for item in args.sequences.split(",") if item.strip()]
     scenario_names = [item.strip() for item in args.scenarios.split(",") if item.strip()]
+    severity_grid = [float(item.strip()) for item in args.severity_grid.split(",") if item.strip()]
 
     unknown = [name for name in scenario_names if name not in SCENARIO_PRESETS]
     if unknown:
         raise ValueError(f"Unknown scenarios: {', '.join(unknown)}")
+    if severity_grid:
+        for value in severity_grid:
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"Severity must be in [0, 1], got {value}")
+
+    scenario_instances = _build_scenario_instances(scenario_names, severity_grid)
 
     rows: list[Dict[str, object]] = []
     for sequence in sequences:
@@ -368,8 +417,8 @@ def main():
             force=args.force,
         )
 
-        for scenario_name in scenario_names:
-            scenario = SCENARIO_PRESETS[scenario_name]
+        for scenario in scenario_instances:
+            scenario_name = str(scenario["scenario_slug"])
             row = _run_scenario(
                 sequence=sequence,
                 scenario_name=scenario_name,

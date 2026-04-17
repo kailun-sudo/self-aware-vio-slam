@@ -140,15 +140,21 @@ self_aware_slam/slam_metrics_dataset/MH_01_unified/
 多序列 degradation sweep 输出：
 
 ```text
-outputs/multisequence_degradation_sweep/
+outputs/multisequence_degradation_grid/
 ├── sweep_results.csv
 ├── MH_01_easy/
 ├── MH_02_easy/
 ├── MH_03_medium/
+├── MH_04_difficult/
+├── MH_05_difficult/
 └── report/
     ├── multi_sequence_summary.txt
     ├── scenario_aggregate.csv
     ├── sequence_aggregate.csv
+    ├── benchmark_runs.csv
+    ├── benchmark_scenario_severity.csv
+    ├── benchmark_failure_delta_pivot.csv
+    ├── benchmark_failure_delta_pivot.md
     ├── multi_sequence_overview.png
     └── visual_demo.html
 ```
@@ -214,9 +220,10 @@ bash /Users/kailunwang/Desktop/ossa/integration/run_batch_unified_pipeline.sh \
 /Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
   /Users/kailunwang/Desktop/ossa/integration/run_multisequence_degradation_sweep.py \
   --dataset-root /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/sequences \
-  --sequences MH_01_easy,MH_02_easy,MH_03_medium \
-  --scenarios blur_bias,noise_amp,lighting_dropout \
-  --output-root /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_sweep
+  --sequences MH_01_easy,MH_02_easy,MH_03_medium,MH_04_difficult,MH_05_difficult \
+  --scenarios blur_bias,noise_amp,lighting_dropout,dropout_bias \
+  --severity-grid 0.45,0.70 \
+  --output-root /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_grid
 ```
 
 目录约定是：
@@ -243,18 +250,20 @@ bash /Users/kailunwang/Desktop/ossa/integration/run_batch_unified_pipeline.sh \
 - 结果分析
 - 训练序列打包
 - 多序列批处理入口
+- 跨序列 benchmark 表和 severity 网格 sweep
 
 ## 当前限制
 
 - 当前主 SLAM 是 notebook-derived 纯 Python VIO，不是完整 C++ ORB-SLAM3
 - self-aware 模型已能接入，但还存在域偏移，结果可用于系统展示，不适合当成最终精度结论
 - 当前主集成是离线式，不是在线每帧推理
+- 当前公开 benchmark 已覆盖 `MH_01 ~ MH_05`，但 `V1 / V2` 还未纳入同一套公开 sweep
 
 ## 当前建议
 
 如果你的目标是“把系统做出来”，下一步优先做：
 
-1. 跑通 `MH_02`、`MH_03`
-2. 用批处理脚本积累更多 `*_unified` 序列
+1. 把 `V1 / V2` 序列接进现有 severity-grid benchmark
+2. 继续积累更多 `*_unified` 训练序列
 3. 只做最低限度模型校准，不深挖调参
-4. 把项目作为完整 pipeline 展示，而不是只展示单个模型指标
+4. 把项目作为完整 pipeline + benchmark package 展示，而不是只展示单个模型指标

@@ -455,6 +455,8 @@ head -n 20 /Users/kailunwang/Desktop/ossa/outputs/mh01_self_aware/reliability_pr
 - `MH_01_easy`
 - `MH_02_easy`
 - `MH_03_medium`
+- `MH_04_difficult`
+- `MH_05_difficult`
 
 默认代表性退化：
 
@@ -464,13 +466,20 @@ head -n 20 /Users/kailunwang/Desktop/ossa/outputs/mh01_self_aware/reliability_pr
   - `gaussian_noise + noise_amplification`
 - `lighting_dropout`
   - `brightness_change`
+- `dropout_bias`
+  - `image_dropout + bias_drift`
+
+默认 severity 网格：
+
+- `0.45`
+- `0.70`
 
 ### 最后会产出什么
 
 除了每条 run 自己的 comparison GUI，还会有一个总报告目录：
 
 ```text
-/Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_sweep/report
+/Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_grid/report
 ```
 
 里面有：
@@ -479,6 +488,10 @@ head -n 20 /Users/kailunwang/Desktop/ossa/outputs/mh01_self_aware/reliability_pr
 - `multi_sequence_summary.txt`
 - `scenario_aggregate.csv`
 - `sequence_aggregate.csv`
+- `benchmark_runs.csv`
+- `benchmark_scenario_severity.csv`
+- `benchmark_failure_delta_pivot.csv`
+- `benchmark_failure_delta_pivot.md`
 - `multi_sequence_overview.png`
 - `visual_demo.html`
 
@@ -492,6 +505,30 @@ head -n 20 /Users/kailunwang/Desktop/ossa/outputs/mh01_self_aware/reliability_pr
 - 哪个序列最脆弱
 - 哪个 run 的 failure delta 最大
 - 哪些单条 comparison GUI 最值得单独点进去看
+
+### 这轮公开 benchmark 现在做到哪一步
+
+目前已经实际跑完：
+
+- 5 条 Machine Hall 序列
+- 4 个复合退化场景
+- 2 个 severity
+- 共 `40` 组 degraded run
+
+所以它不再只是：
+
+- “我拿 3 条序列试了一下”
+
+而是已经更接近：
+
+- “我有一套稳定的跨序列 stress-test benchmark”
+
+这也意味着你后面要继续扩展时，最自然的下一步不是再重复 MH，而是补：
+
+- `V1_*`
+- `V2_*`
+
+把 benchmark 从 `Machine Hall only` 扩到 `cross-room / cross-motion regime`。
 
 ### `pose_errors.csv`
 

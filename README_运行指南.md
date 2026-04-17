@@ -447,49 +447,69 @@ bash /Users/kailunwang/Desktop/ossa/integration/run_linux_vm_pipeline.sh \
 
 ## 13. 多序列 degradation sweep
 
-如果你要一次性跑多条 EuRoC 序列，并在每条序列上复用 baseline、批量比较多个代表性退化场景，直接运行：
+如果你要一次性跑多条 EuRoC 序列，并在每条序列上复用 baseline、批量比较多个代表性退化场景与 severity 网格，直接运行：
 
 ```bash
 /Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
   /Users/kailunwang/Desktop/ossa/integration/run_multisequence_degradation_sweep.py \
   --dataset-root /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/sequences \
-  --sequences MH_01_easy,MH_02_easy,MH_03_medium \
-  --scenarios blur_bias,noise_amp,lighting_dropout \
-  --output-root /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_sweep
+  --sequences MH_01_easy,MH_02_easy,MH_03_medium,MH_04_difficult,MH_05_difficult \
+  --scenarios blur_bias,noise_amp,lighting_dropout,dropout_bias \
+  --severity-grid 0.45,0.70 \
+  --output-root /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_grid
 ```
 
-默认这 3 个场景分别代表：
+当前公开 benchmark 默认覆盖：
+
+- 5 条序列：`MH_01_easy`、`MH_02_easy`、`MH_03_medium`、`MH_04_difficult`、`MH_05_difficult`
+- 4 个复合场景：`blur_bias`、`noise_amp`、`lighting_dropout`、`dropout_bias`
+- 2 个 severity：`0.45`、`0.70`
+
+默认这 4 个场景分别代表：
 
 - `blur_bias`: `motion_blur + bias_drift`
 - `noise_amp`: `gaussian_noise + noise_amplification`
 - `lighting_dropout`: `brightness_change`
+- `dropout_bias`: `image_dropout + bias_drift`
 
 脚本会自动完成：
 
 1. 每条序列 baseline 只跑一次
 2. 每个退化场景单独跑 degraded VIO
-3. 每个场景分别做 offline self-aware inference
-4. 自动生成每条序列 / 每个场景的 comparison GUI
-5. 自动汇总成跨序列总表和总 GUI
+3. 每个 severity 自动展开成单独 run
+4. 每个 run 分别做 offline self-aware inference
+5. 自动生成每条序列 / 每个 run 的 comparison GUI
+6. 自动汇总成跨序列总表、benchmark 表和总 GUI
 
 关键输出：
 
-- `outputs/multisequence_degradation_sweep/sweep_results.csv`
-- `outputs/multisequence_degradation_sweep/report/multi_sequence_summary.txt`
-- `outputs/multisequence_degradation_sweep/report/scenario_aggregate.csv`
-- `outputs/multisequence_degradation_sweep/report/sequence_aggregate.csv`
-- `outputs/multisequence_degradation_sweep/report/multi_sequence_overview.png`
-- `outputs/multisequence_degradation_sweep/report/visual_demo.html`
+- `outputs/multisequence_degradation_grid/sweep_results.csv`
+- `outputs/multisequence_degradation_grid/report/multi_sequence_summary.txt`
+- `outputs/multisequence_degradation_grid/report/scenario_aggregate.csv`
+- `outputs/multisequence_degradation_grid/report/sequence_aggregate.csv`
+- `outputs/multisequence_degradation_grid/report/benchmark_runs.csv`
+- `outputs/multisequence_degradation_grid/report/benchmark_scenario_severity.csv`
+- `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.csv`
+- `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.md`
+- `outputs/multisequence_degradation_grid/report/multi_sequence_overview.png`
+- `outputs/multisequence_degradation_grid/report/visual_demo.html`
 
 总 GUI 页面位置：
 
 ```text
-/Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_sweep/report/visual_demo.html
+/Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_grid/report/visual_demo.html
 ```
 
 这个页面支持：
 
-- 按 sequence / scenario / camera / imu 过滤
+- 按 sequence / scenario / severity / camera / imu 过滤
 - 查看每个 run 的 failure / confidence / pose error / inlier ratio 变化量
 - 直接跳转到单条 run 的 comparison GUI
 - 快速定位“哪个退化场景整体最伤系统”
+
+当前这轮公开结果摘要：
+
+- 覆盖 `5` 条 MH 序列、`4` 个 base 场景、`2` 个 severity，总计 `40` 组 run
+- 平均 `failure delta` 最大场景：`blur_bias_s45`
+- 平均 `pose error delta` 最大场景：`noise_amp_s45`
+- 平均看，`MH_05` 对 `failure/confidence` 变化最敏感，`MH_04`、`MH_05` 的脆弱性高于前 3 条 easy/medium 序列
