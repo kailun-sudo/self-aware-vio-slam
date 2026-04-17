@@ -74,6 +74,15 @@ VIO-SLAM/run_pipeline.py
 - `run_batch_unified_pipeline.sh`
   - 多序列批量运行
 
+- `run_euroc_degradation_demo.py`
+  - 单序列 baseline vs degraded 仿真与 comparison GUI
+
+- `run_multisequence_degradation_sweep.py`
+  - 多序列、多场景 degradation sweep
+
+- `create_multisequence_degradation_report.py`
+  - 跨序列汇总报告与总 GUI
+
 ## 当前系统输入输出
 
 ### 输入
@@ -126,6 +135,22 @@ self_aware_slam/slam_metrics_dataset/MH_01_unified/
 ├── groundtruth.csv
 ├── estimated.csv
 └── packaging_summary.txt
+```
+
+多序列 degradation sweep 输出：
+
+```text
+outputs/multisequence_degradation_sweep/
+├── sweep_results.csv
+├── MH_01_easy/
+├── MH_02_easy/
+├── MH_03_medium/
+└── report/
+    ├── multi_sequence_summary.txt
+    ├── scenario_aggregate.csv
+    ├── sequence_aggregate.csv
+    ├── multi_sequence_overview.png
+    └── visual_demo.html
 ```
 
 ## 最小运行流程
@@ -181,6 +206,17 @@ cd /Users/kailunwang/Desktop/ossa
 bash /Users/kailunwang/Desktop/ossa/integration/run_batch_unified_pipeline.sh \
   --dataset-root /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/sequences \
   --sequences MH_01_easy,MH_02_easy,MH_03_medium
+```
+
+如果你要展示更完整的 stress test 能力，可以再跑：
+
+```bash
+/Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
+  /Users/kailunwang/Desktop/ossa/integration/run_multisequence_degradation_sweep.py \
+  --dataset-root /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/sequences \
+  --sequences MH_01_easy,MH_02_easy,MH_03_medium \
+  --scenarios blur_bias,noise_amp,lighting_dropout \
+  --output-root /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_sweep
 ```
 
 目录约定是：

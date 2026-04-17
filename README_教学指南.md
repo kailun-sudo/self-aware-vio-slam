@@ -413,6 +413,86 @@ head -n 20 /Users/kailunwang/Desktop/ossa/outputs/mh01_self_aware/reliability_pr
 
 而不是普通 demo 页面。
 
+### 再往前一步：为什么要做 multi-sequence sweep
+
+单条序列的 comparison GUI 解决的是：
+
+- 某一种退化会不会让系统更危险
+
+但如果你要更像实验，而不是只像 demo，还需要回答：
+
+- 这个现象是不是只在 `MH_01` 上成立
+- 不同退化类型谁更伤系统
+- 哪种退化更容易让 failure probability 抬高
+- 哪种退化更容易让 pose error 变大
+
+所以我又加了一条更高层的主线：
+
+```text
+/Users/kailunwang/Desktop/ossa/integration/run_multisequence_degradation_sweep.py
+```
+
+它做的事是：
+
+1. 选多条 EuRoC 序列
+2. 每条序列 baseline 只跑一次
+3. 对每条序列跑多个代表性退化场景
+4. 为每个 run 自动生成 comparison GUI
+5. 最后再汇总成一个跨序列总表和总 GUI
+
+这样你得到的就不是：
+
+- “一个退化 demo”
+
+而是：
+
+- “一个小型 stress-test experiment package”
+
+### 这条多序列 sweep 现在默认做什么
+
+默认序列：
+
+- `MH_01_easy`
+- `MH_02_easy`
+- `MH_03_medium`
+
+默认代表性退化：
+
+- `blur_bias`
+  - `motion_blur + bias_drift`
+- `noise_amp`
+  - `gaussian_noise + noise_amplification`
+- `lighting_dropout`
+  - `brightness_change`
+
+### 最后会产出什么
+
+除了每条 run 自己的 comparison GUI，还会有一个总报告目录：
+
+```text
+/Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_sweep/report
+```
+
+里面有：
+
+- `sweep_results.csv`
+- `multi_sequence_summary.txt`
+- `scenario_aggregate.csv`
+- `sequence_aggregate.csv`
+- `multi_sequence_overview.png`
+- `visual_demo.html`
+
+这个总 GUI 更像一个：
+
+**cross-sequence experiment dashboard**
+
+它回答的是：
+
+- 哪个退化场景平均最危险
+- 哪个序列最脆弱
+- 哪个 run 的 failure delta 最大
+- 哪些单条 comparison GUI 最值得单独点进去看
+
 ### `pose_errors.csv`
 
 这是把 `estimated_tum.txt` 和 ground truth 对齐后得到的真实误差。

@@ -37,6 +37,7 @@ EuRoC mav0
 - Interactive local GUI demo for trajectory risk playback
 - EuRoC playback with controllable camera / IMU degradation injection
 - Baseline-vs-degraded comparison GUI for self-awareness stress testing
+- Multi-sequence degradation sweep with aggregate summary and interactive HTML report
 - Packaging of unified runs into reusable training-ready sequences
 
 ## Demo Screenshots
@@ -52,6 +53,8 @@ Interactive dashboard source view:
 Baseline-vs-degraded playback comparison:
 
 ![Degradation comparison overview](docs/assets/degradation_comparison_overview.png)
+
+![Multi-sequence degradation overview](docs/assets/multi_sequence_overview.png)
 
 ## Quick Start
 
@@ -117,6 +120,22 @@ Then open:
 
 ```text
 outputs/euroc_degradation_quick/comparison/gui/visual_demo.html
+```
+
+Run a representative multi-sequence sweep across several EuRoC sequences:
+
+```bash
+self_aware_slam/venv/bin/python integration/run_multisequence_degradation_sweep.py \
+  --dataset-root VIO-SLAM/data/sequences \
+  --sequences MH_01_easy,MH_02_easy,MH_03_medium \
+  --scenarios blur_bias,noise_amp,lighting_dropout \
+  --output-root outputs/multisequence_degradation_sweep
+```
+
+Then open:
+
+```text
+outputs/multisequence_degradation_sweep/report/visual_demo.html
 ```
 
 ## Documentation

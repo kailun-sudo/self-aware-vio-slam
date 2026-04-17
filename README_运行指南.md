@@ -113,6 +113,29 @@ bash /Users/kailunwang/Desktop/ossa/integration/download_euroc_mh.sh \
   --sequence MH_02_easy
 ```
 
+现在这个脚本已经改成适配 **EuRoC 新官方托管源** 的版本：
+
+- 优先从 ETH Research Collection 下载对应大类压缩包
+- `Machine Hall` 大包里再自动抽取你指定的单条序列
+- 不再依赖老的单序列直链
+
+如果你要准备多序列实验，不建议都放到 `VIO-SLAM/data/mav0`，而是按下面的结构整理：
+
+```text
+/Users/kailunwang/Desktop/ossa/VIO-SLAM/data/sequences/MH_01_easy/mav0
+/Users/kailunwang/Desktop/ossa/VIO-SLAM/data/sequences/MH_02_easy/mav0
+/Users/kailunwang/Desktop/ossa/VIO-SLAM/data/sequences/MH_03_medium/mav0
+```
+
+例如下载 `MH_02_easy` 到多序列目录：
+
+```bash
+bash /Users/kailunwang/Desktop/ossa/integration/download_euroc_mh.sh \
+  --sequence MH_02_easy \
+  --output-root /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/sequences/MH_02_easy \
+  --keep-zip
+```
+
 ## 5. 第一步：运行 VIO-SLAM
 
 如果数据在默认位置 `VIO-SLAM/data/mav0`：
@@ -421,3 +444,52 @@ bash /Users/kailunwang/Desktop/ossa/integration/run_linux_vm_pipeline.sh \
 - failure probability 与 confidence 双路时间线对比
 - tracking / error 指标对比
 - 跳转到退化后风险抬升最明显的帧
+
+## 13. 多序列 degradation sweep
+
+如果你要一次性跑多条 EuRoC 序列，并在每条序列上复用 baseline、批量比较多个代表性退化场景，直接运行：
+
+```bash
+/Users/kailunwang/Desktop/ossa/self_aware_slam/venv/bin/python \
+  /Users/kailunwang/Desktop/ossa/integration/run_multisequence_degradation_sweep.py \
+  --dataset-root /Users/kailunwang/Desktop/ossa/VIO-SLAM/data/sequences \
+  --sequences MH_01_easy,MH_02_easy,MH_03_medium \
+  --scenarios blur_bias,noise_amp,lighting_dropout \
+  --output-root /Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_sweep
+```
+
+默认这 3 个场景分别代表：
+
+- `blur_bias`: `motion_blur + bias_drift`
+- `noise_amp`: `gaussian_noise + noise_amplification`
+- `lighting_dropout`: `brightness_change`
+
+脚本会自动完成：
+
+1. 每条序列 baseline 只跑一次
+2. 每个退化场景单独跑 degraded VIO
+3. 每个场景分别做 offline self-aware inference
+4. 自动生成每条序列 / 每个场景的 comparison GUI
+5. 自动汇总成跨序列总表和总 GUI
+
+关键输出：
+
+- `outputs/multisequence_degradation_sweep/sweep_results.csv`
+- `outputs/multisequence_degradation_sweep/report/multi_sequence_summary.txt`
+- `outputs/multisequence_degradation_sweep/report/scenario_aggregate.csv`
+- `outputs/multisequence_degradation_sweep/report/sequence_aggregate.csv`
+- `outputs/multisequence_degradation_sweep/report/multi_sequence_overview.png`
+- `outputs/multisequence_degradation_sweep/report/visual_demo.html`
+
+总 GUI 页面位置：
+
+```text
+/Users/kailunwang/Desktop/ossa/outputs/multisequence_degradation_sweep/report/visual_demo.html
+```
+
+这个页面支持：
+
+- 按 sequence / scenario / camera / imu 过滤
+- 查看每个 run 的 failure / confidence / pose error / inlier ratio 变化量
+- 直接跳转到单条 run 的 comparison GUI
+- 快速定位“哪个退化场景整体最伤系统”
