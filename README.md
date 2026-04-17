@@ -161,12 +161,13 @@ This writes:
 
 The v2 dataset differs from the currently deployed runtime model in two ways:
 
-- it uses a **future** target (`future_max_pose_error` over the next 10 frames)
+- it uses a **future** target (`future_max_pose_error` over the next 5 frames)
 - it uses **22 trend-aware learning features** instead of the current 7-D runtime feature set
 - it now prefers a **hybrid training source**: long baseline sequence dirs + degraded replay runs
 - degraded replay runs are split by **sequence-aware replay family** (currently `(sequence, base_scenario)`), so the same replay family does not cross train/val/test
 - the builder now prints **selected source / replay-run count / fallback status** so source selection is auditable
 - the default split protocol is **`family_aware_dev`**; use `--split-protocol sequence_held_out` for a strict cross-sequence benchmark dataset
+- the default `prediction_horizon` is now **5**, which retains the public `MH_04/MH_05` degraded replay runs and writes dataset diagnostics (`y_error` histograms + retained-run summaries)
 
 Validate whether the currently deployed predictor is actually aligned with real pose error:
 

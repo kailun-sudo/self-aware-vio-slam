@@ -193,7 +193,7 @@
 - 旧版更偏“当前诊断量 + 混合标签”
 - v2 明确统一成：
   - 输入：22 维 trend-aware learning features
-  - 回归目标：未来 10 帧内的 `future_max_pose_error`
+  - 回归目标：未来 5 帧内的 `future_max_pose_error`
   - 分类目标：`future_max_pose_error > 0.18m` 或未来 tracking lost
   - 数据源：长 baseline 序列 + degraded replay runs
   - split 方式：按 **sequence-aware replay family** 切 degraded runs，而不是把同一 replay family 分散到不同 split
@@ -227,17 +227,12 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 
 这个 protocol 会把同一个 sequence 的 baseline + degraded 全部放到同一个 split。
 
-当前要额外注意一个现实问题：
+当前默认 `prediction_horizon = 5`，已经能保留 `MH_04_difficult` / `MH_05_difficult` 的公开 degraded runs。
 
-- 公开 sweep 里的 `MH_04_difficult` / `MH_05_difficult` degraded runs 是 downsample 过的
-- 在 `window_size=10` + `prediction_horizon=10` 下，很多 strict held-out degraded runs 会因为太短被跳过
-
-所以当前 `sequence_held_out` 的意义主要是：
+所以当前 `sequence_held_out` 的意义是两件事同时成立：
 
 - 严格避免 sequence leakage
-- 先建立正确 benchmark protocol
-
-但如果你要做更强的 held-out 泛化实验，还需要重新生成更长的 hard-sequence degraded replay 数据。
+- val/test 里也保留了 hard-sequence degraded 样本
 
 ---
 
@@ -298,16 +293,21 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 - `source_mode = hybrid`
 - `window_size = 10`
 - `feature_dim = 22`
-- `train failure rate ≈ 9.5%`
-- `val failure rate ≈ 20.5%`
-- `test failure rate ≈ 20.6%`
-- `train y_error range ≈ [0.116, 9.079]`
-- `val y_error range ≈ [0.115, 9.994]`
-- `test y_error range ≈ [0.116, 9.063]`
+- `train failure rate ≈ 6.7%`
+- `val failure rate ≈ 16.4%`
+- `test failure rate ≈ 16.8%`
+- `train y_error range ≈ [0.103, 12.918]`
+- `val y_error range ≈ [0.103, 12.628]`
+- `test y_error range ≈ [0.109, 12.871]`
 - split run counts:
   - `train = 23`
   - `val = 11`
   - `test = 11`
+
+同时 builder 会输出 diagnostics，直接帮你检查：
+
+- 三个 split 的 `y_error` histogram
+- 每个 split / sequence 的 retained degraded run 情况
 
 这里最关键的变化不是“多了特征”，而是：
 

@@ -35,6 +35,9 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -83,6 +86,12 @@ def _resolve_dataset_path(config: dict) -> str:
         'train_dataset_path',
         os.path.join(config['paths']['results_dir'], 'train_dataset_v2.pkl'),
     )
+
+
+def _resolve_diagnostics_dir(output_path: str | Path) -> Path:
+    output_path = Path(output_path)
+    stem = output_path.with_suffix('').name
+    return output_path.with_suffix('').parent / f"{stem}_diagnostics"
 
 
 def _canonical_sequence_group(name: str) -> str:
@@ -472,6 +481,67 @@ def _build_splits(records: List[Dict[str, object]], source_mode: str, config: di
     return splits
 
 
+def _write_dataset_diagnostics(dataset: Dict, output_path: str | Path):
+    diagnostics_dir = _resolve_diagnostics_dir(output_path)
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+
+    run_rows = []
+    for split_name, rows in dataset.get('split_diagnostics', {}).items():
+        for row in rows:
+            run_rows.append({'split': split_name, **row})
+
+    if run_rows:
+        run_df = pd.DataFrame(run_rows)
+        run_df.to_csv(diagnostics_dir / 'split_run_summary.csv', index=False)
+
+        sequence_df = (
+            run_df.groupby(['split', 'sequence', 'run_kind', 'retained'], dropna=False)
+            .agg(run_count=('run_id', 'count'), sample_count=('sample_count', 'sum'))
+            .reset_index()
+            .sort_values(['split', 'sequence', 'run_kind', 'retained'])
+        )
+        sequence_df.to_csv(diagnostics_dir / 'split_sequence_summary.csv', index=False)
+
+    histogram_rows = []
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
+    for ax, split_name in zip(axes, ['train', 'val', 'test']):
+        y_error = dataset[split_name]['y_error']
+        counts, bin_edges = np.histogram(y_error, bins=20)
+        for idx, count in enumerate(counts):
+            histogram_rows.append(
+                {
+                    'split': split_name,
+                    'bin_left': float(bin_edges[idx]),
+                    'bin_right': float(bin_edges[idx + 1]),
+                    'count': int(count),
+                }
+            )
+        ax.hist(y_error, bins=20, color='#4C78A8', alpha=0.85, edgecolor='white')
+        ax.set_title(f"{split_name} y_error")
+        ax.set_xlabel('future_max_pose_error')
+        if split_name == 'train':
+            ax.set_ylabel('count')
+    fig.tight_layout()
+    fig.savefig(diagnostics_dir / 'y_error_histograms.png', dpi=180)
+    plt.close(fig)
+    pd.DataFrame(histogram_rows).to_csv(diagnostics_dir / 'y_error_histogram_bins.csv', index=False)
+
+    summary_lines = [
+        "Dataset diagnostics",
+        f"source_mode: {dataset.get('source_mode')}",
+        f"split_protocol: {dataset.get('split_protocol')}",
+        f"source_info: {dataset.get('source_info')}",
+    ]
+    for split_name in ['train', 'val', 'test']:
+        y_error = dataset[split_name]['y_error']
+        y_failure = dataset[split_name]['y_failure']
+        summary_lines.append(
+            f"{split_name}: n={len(y_error)}, failure_rate={float(np.mean(y_failure)):.4f}, "
+            f"y_error_range=[{float(np.min(y_error)):.3f}, {float(np.max(y_error)):.3f}]"
+        )
+    (diagnostics_dir / 'summary.txt').write_text('\n'.join(summary_lines) + '\n', encoding='utf-8')
+
+
 def build_dataset(config: dict | None = None) -> Dict:
     """Build the complete reliability dataset."""
     if config is None:
@@ -531,10 +601,12 @@ def build_dataset(config: dict | None = None) -> Dict:
             ]
             for split_name, split_records in splits.items()
         },
+        'split_diagnostics': {},
     }
 
     for split_name, split_records in splits.items():
         X_list, y_error_list, y_failure_list = [], [], []
+        split_diagnostics = []
 
         for record in split_records:
             metrics, errors = _align_metrics_and_errors(record['metrics'], record['errors'])
@@ -562,6 +634,21 @@ def build_dataset(config: dict | None = None) -> Dict:
             )
 
             if len(features_for_windows) < window_size:
+                split_diagnostics.append(
+                    {
+                        'run_id': record['run_id'],
+                        'sequence': record['sequence'],
+                        'sequence_group': record.get('sequence_group', _canonical_sequence_group(record['sequence'])),
+                        'run_kind': record['run_kind'],
+                        'scenario': record['scenario'],
+                        'base_scenario': record['base_scenario'],
+                        'severity': record['severity'],
+                        'retained': False,
+                        'reason': 'too_short_after_horizon_trim',
+                        'sample_count': 0,
+                        'trimmed_length': int(len(features_for_windows)),
+                    }
+                )
                 print(
                     f"  Warning: {record['run_id']} too short after horizon trim "
                     f"(len={len(features_for_windows)}), skipping"
@@ -578,6 +665,21 @@ def build_dataset(config: dict | None = None) -> Dict:
             X_list.append(X)
             y_error_list.append(y_err)
             y_failure_list.append(y_fail)
+            split_diagnostics.append(
+                {
+                    'run_id': record['run_id'],
+                    'sequence': record['sequence'],
+                    'sequence_group': record.get('sequence_group', _canonical_sequence_group(record['sequence'])),
+                    'run_kind': record['run_kind'],
+                    'scenario': record['scenario'],
+                    'base_scenario': record['base_scenario'],
+                    'severity': record['severity'],
+                    'retained': True,
+                    'reason': 'used',
+                    'sample_count': int(len(X)),
+                    'trimmed_length': int(len(features_for_windows)),
+                }
+            )
 
         if not X_list:
             raise ValueError(
@@ -591,6 +693,7 @@ def build_dataset(config: dict | None = None) -> Dict:
             'y_error': np.concatenate(y_error_list),
             'y_failure': np.concatenate(y_failure_list),
         }
+        dataset['split_diagnostics'][split_name] = split_diagnostics
 
         n = len(dataset[split_name]['X'])
         n_fail = dataset[split_name]['y_failure'].sum()
@@ -633,6 +736,7 @@ def main():
 
     output_path = args.output_path or _resolve_dataset_path(config)
     save_dataset(dataset, output_path)
+    _write_dataset_diagnostics(dataset, output_path)
 
     print("\nDataset summary:")
     print(f"  source_mode: {dataset['source_mode']}")

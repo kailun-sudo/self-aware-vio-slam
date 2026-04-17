@@ -249,12 +249,9 @@ builder 还会显式打印：
   - 严格跨 sequence benchmark
   - 同一个 sequence 的 baseline + degraded 全部进入同一个 split
 
-当前实现上的 caveat 是：
+当前默认 `prediction_horizon = 5`，所以 `MH_04_difficult` / `MH_05_difficult` 的公开 degraded replay runs 已经可以被保留。
 
-- `MH_04_difficult` / `MH_05_difficult` 的公开 degraded replay runs 仍然比较短
-- 在 strict held-out protocol 下，它们中的很多会因为 `window_size + prediction_horizon` 约束被跳过
-
-所以 `sequence_held_out` 现在主要解决的是 **protocol correctness**，而不是已经拥有一个非常强的 hard-sequence degraded held-out set。
+这意味着 `sequence_held_out` 现在不只是 protocol 正确，而且 val/test 里也已经有可用的 hard-sequence degraded 样本。
 
 这样做的目的很直接：
 

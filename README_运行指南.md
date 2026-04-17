@@ -114,7 +114,7 @@
 也就是说，v2 现在解决的是：
 
 ```text
-看最近 10 帧内部状态 -> 预测接下来 10 帧内最坏会坏到什么程度
+看最近 10 帧内部状态 -> 预测接下来 5 帧内最坏会坏到什么程度
 ```
 
 当前 v2 数据构建默认是 `source_mode = auto`，选择优先级是：
@@ -153,14 +153,9 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 
 这会保证同一个 sequence 的 baseline + degraded runs 全部进入同一个 split。
 
-注意：基于当前公开的 `multisequence_degradation_grid` 结果，`MH_04_difficult` 和 `MH_05_difficult` 的 degraded runs 由于 downsample 后长度太短，很多会在 `window_size=10` 和 `prediction_horizon=10` 下被跳过。
+当前默认 `prediction_horizon = 5`，已经能保留 `MH_04/MH_05` 的公开 degraded replay runs。
 
-所以当前 `sequence_held_out` 更准确地说是：
-
-- 结构上严格避免 sequence leakage
-- 但 `val/test` 里可用的 degraded 样本还偏少
-
-如果你要做更强的 strict benchmark，下一步应当重跑 `MH_04/MH_05` 的 degradation replay，并降低 downsample。
+也就是说，当前 `sequence_held_out` 不只是 protocol 正确，`val/test` 里也已经保留了 hard-sequence degraded 样本。
 
 builder 现在会显式打印：
 
@@ -275,21 +270,29 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 - `window_size = 10`
 - `feature_dim = 22`
 - `target.mode = future_window_max`
-- `prediction_horizon = 10`
+- `prediction_horizon = 5`
 - `classification_error_threshold = 0.18`
 
 当前一版 sanity check 结果大致是：
 
-- `train failure rate ≈ 9.5%`
-- `val failure rate ≈ 20.5%`
-- `test failure rate ≈ 20.6%`
-- `train y_error range ≈ [0.116, 9.079]`
-- `val y_error range ≈ [0.115, 9.994]`
-- `test y_error range ≈ [0.116, 9.063]`
+- `train failure rate ≈ 6.7%`
+- `val failure rate ≈ 16.4%`
+- `test failure rate ≈ 16.8%`
+- `train y_error range ≈ [0.103, 12.918]`
+- `val y_error range ≈ [0.103, 12.628]`
+- `test y_error range ≈ [0.109, 12.871]`
 - split run counts:
-  - `train = 23`
+ - `train = 23`
   - `val = 11`
   - `test = 11`
+
+builder 现在还会额外写出 diagnostics：
+
+- `results/train_dataset_v2_diagnostics/summary.txt`
+- `results/train_dataset_v2_diagnostics/y_error_histograms.png`
+- `results/train_dataset_v2_diagnostics/y_error_histogram_bins.csv`
+- `results/train_dataset_v2_diagnostics/split_run_summary.csv`
+- `results/train_dataset_v2_diagnostics/split_sequence_summary.csv`
 
 这一步的作用不是跑 demo，而是为后续重新训练一个更合理的 self-aware predictor 做准备。
 

@@ -82,7 +82,7 @@ failure:
 # V2 learning target definition
 targets:
   mode: "future_window_max"
-  prediction_horizon: 10
+  prediction_horizon: 5
   regression_target: "future_max_pose_error"
   regression_aggregation: "max"
   classification_error_threshold: 0.18
