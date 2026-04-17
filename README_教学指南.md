@@ -196,7 +196,19 @@
   - 回归目标：未来 10 帧内的 `future_max_pose_error`
   - 分类目标：`future_max_pose_error > 0.18m` 或未来 tracking lost
   - 数据源：长 baseline 序列 + degraded replay runs
-  - split 方式：run-level split，而不是只按整条 sequence 切
+  - split 方式：按 **sequence-aware replay family** 切 degraded runs，而不是把同一 replay family 分散到不同 split
+
+当前 `source_mode = auto` 的优先级是：
+
+1. 同时找到 baseline sequence dirs 和 replay runs：`hybrid`
+2. 只找到 replay runs：`sweep_runs`
+3. 只找到 baseline sequence dirs：`sequence_dirs`
+
+builder 会显式打印：
+
+- 选中的 data source
+- 找到多少 replay runs
+- 是否触发 fallback
 
 ---
 
@@ -260,6 +272,9 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 - `train failure rate ≈ 9.5%`
 - `val failure rate ≈ 20.5%`
 - `test failure rate ≈ 20.6%`
+- `train y_error range ≈ [0.116, 9.079]`
+- `val y_error range ≈ [0.115, 9.994]`
+- `test y_error range ≈ [0.116, 9.063]`
 - split run counts:
   - `train = 23`
   - `val = 11`

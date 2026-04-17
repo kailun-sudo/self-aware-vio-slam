@@ -228,7 +228,16 @@ v2 不再混用 current failure 和 predictive failure。
 - 长 baseline sequence dirs
 - 多序列 degradation sweep 生成的 degraded replay runs
 
-再按 **run-level** 做 split。
+如果两者都存在，就走 `hybrid`；如果缺 replay runs，就回退到 `sequence_dirs`；如果只有 replay runs，就走 `sweep_runs`。
+
+对 degraded replay runs，当前不再做简单 run-level shuffle，而是按
+`(sequence, base_scenario)` 作为 **replay family** 做 split，避免同一 replay family 同时出现在 train 和 test。
+
+builder 还会显式打印：
+
+- 当前选中的 data source
+- 找到多少 replay runs
+- 是否触发 fallback
 
 这样做的目的很直接：
 

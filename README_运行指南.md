@@ -117,12 +117,32 @@
 看最近 10 帧内部状态 -> 预测接下来 10 帧内最坏会坏到什么程度
 ```
 
-当前 v2 数据构建默认优先使用：
+当前 v2 数据构建默认是 `source_mode = auto`，选择优先级是：
 
-- `self_aware_slam/slam_metrics_dataset/MH_*` 里的长 baseline 序列
-- `outputs/multisequence_degradation_grid/` 里的 degraded replay runs
+1. 如果 `slam_metrics_dataset/MH_*` 和 `outputs/multisequence_degradation_grid/` 都存在：
+   使用 **hybrid**
+2. 如果只有 replay runs：
+   使用 **sweep_runs**
+3. 如果只有长 baseline 序列：
+   回退到 **sequence_dirs**
 
-也就是一个 **hybrid source**，再按 **run-level** 做 split。
+也就是说，当前默认会优先构建：
+
+- 长 baseline 序列：`self_aware_slam/slam_metrics_dataset/MH_*`
+- degraded replay runs：`outputs/multisequence_degradation_grid/`
+
+然后做一个 **hybrid source**。
+
+其中 degraded replay runs 不再只是普通 run-level shuffle，而是按
+`(sequence, base_scenario)` 作为 **replay family** 做 split，保证同一 replay family 不跨 train / val / test。
+
+builder 现在会显式打印：
+
+- `data source selected`
+- `replay runs found`
+- `fallback activated`
+
+这样可以直接看出当前到底在用 hybrid / sweep_runs / sequence_dirs，而不是 silent fallback。
 
 ## 4.4 一键下载 EuRoC 单序列
 
@@ -237,6 +257,9 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 - `train failure rate ≈ 9.5%`
 - `val failure rate ≈ 20.5%`
 - `test failure rate ≈ 20.6%`
+- `train y_error range ≈ [0.116, 9.079]`
+- `val y_error range ≈ [0.115, 9.994]`
+- `test y_error range ≈ [0.116, 9.063]`
 - split run counts:
   - `train = 23`
   - `val = 11`
