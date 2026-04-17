@@ -195,6 +195,8 @@
   - 输入：22 维 trend-aware learning features
   - 回归目标：未来 10 帧内的 `future_max_pose_error`
   - 分类目标：`future_max_pose_error > 0.18m` 或未来 tracking lost
+  - 数据源：长 baseline 序列 + degraded replay runs
+  - split 方式：run-level split，而不是只按整条 sequence 切
 
 ---
 
@@ -252,17 +254,23 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 
 当前这版 v2 的 sanity check 结果是：
 
+- `source_mode = hybrid`
 - `window_size = 10`
 - `feature_dim = 22`
-- `train failure rate ≈ 8.4%`
-- `val failure rate ≈ 18.9%`
-- `test failure rate ≈ 19.2%`
+- `train failure rate ≈ 9.5%`
+- `val failure rate ≈ 20.5%`
+- `test failure rate ≈ 20.6%`
+- split run counts:
+  - `train = 23`
+  - `val = 11`
+  - `test = 11`
 
 这里最关键的变化不是“多了特征”，而是：
 
 - train / val / test 现在用了同一种 target 定义
 - classification 和 regression 现在都围绕同一个 future target
 - 不再是 train 学 current failure、eval 看 predictive failure 那种错位设置
+- train 现在也真正看到了 degraded replay 里的 failure 模式
 
 ### Step 2：跑 unified demo
 

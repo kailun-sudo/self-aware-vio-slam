@@ -117,6 +117,13 @@
 看最近 10 帧内部状态 -> 预测接下来 10 帧内最坏会坏到什么程度
 ```
 
+当前 v2 数据构建默认优先使用：
+
+- `self_aware_slam/slam_metrics_dataset/MH_*` 里的长 baseline 序列
+- `outputs/multisequence_degradation_grid/` 里的 degraded replay runs
+
+也就是一个 **hybrid source**，再按 **run-level** 做 split。
+
 ## 4.4 一键下载 EuRoC 单序列
 
 如果你本地没有 `mav0`，可以直接用下面的脚本下载并整理成：
@@ -218,6 +225,7 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 
 当前这份数据集已经验证过，核心元数据是：
 
+- `source_mode = hybrid`
 - `window_size = 10`
 - `feature_dim = 22`
 - `target.mode = future_window_max`
@@ -226,9 +234,13 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 
 当前一版 sanity check 结果大致是：
 
-- `train failure rate ≈ 8.4%`
-- `val failure rate ≈ 18.9%`
-- `test failure rate ≈ 19.2%`
+- `train failure rate ≈ 9.5%`
+- `val failure rate ≈ 20.5%`
+- `test failure rate ≈ 20.6%`
+- split run counts:
+  - `train = 23`
+  - `val = 11`
+  - `test = 11`
 
 这一步的作用不是跑 demo，而是为后续重新训练一个更合理的 self-aware predictor 做准备。
 

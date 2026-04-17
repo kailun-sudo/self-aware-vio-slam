@@ -221,6 +221,21 @@ v2 不再混用 current failure 和 predictive failure。
 - regression / classification 围绕同一个 future target
 - 不再出现 train 学当前失败、eval 看未来失败的错位
 
+当前 v2 数据集不再只来自 `slam_metrics_dataset/MH_*` 这种 baseline 序列。
+
+现在默认优先使用：
+
+- 长 baseline sequence dirs
+- 多序列 degradation sweep 生成的 degraded replay runs
+
+再按 **run-level** 做 split。
+
+这样做的目的很直接：
+
+- 让 train 真正看到 failure
+- 让 val/test 也保留 baseline + degraded 的混合分布
+- 避免旧版那种 “train 太干净、test 太难” 的结构性问题
+
 ### 4.3 v2 checkpoint 现在也能走统一推理入口
 
 现在 `src/models/inference.py` 已经同时支持两类 checkpoint：

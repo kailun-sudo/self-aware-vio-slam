@@ -193,6 +193,8 @@ self_aware_slam/results/
 - 输入：22 维 trend-aware learning features
 - 回归目标：未来 10 帧内的 `future_max_pose_error`
 - 分类目标：`future_max_pose_error > 0.18m` 或未来 tracking lost
+- 数据源：长 baseline 序列 + degraded replay runs
+- split：run-level split
 
 ## 最小运行流程
 
@@ -252,11 +254,12 @@ cd /Users/kailunwang/Desktop/ossa/self_aware_slam
 
 并且已经验证过：
 
+- `source_mode = hybrid`
 - `window_size = 10`
 - `feature_dim = 22`
-- `train failure rate ≈ 8.4%`
-- `val failure rate ≈ 18.9%`
-- `test failure rate ≈ 19.2%`
+- `train failure rate ≈ 9.5%`
+- `val failure rate ≈ 20.5%`
+- `test failure rate ≈ 20.6%`
 
 ## 批量运行
 

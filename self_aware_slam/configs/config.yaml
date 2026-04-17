@@ -6,6 +6,7 @@ paths:
   results_dir: "results/"
   model_save_dir: "results/models/"
   train_dataset_path: "results/train_dataset_v2.pkl"
+  degradation_sweep_results: "../outputs/multisequence_degradation_grid/sweep_results.csv"
 
 # EuRoC real-data paths (used by scripts/process_euroc_results.py)
 euroc:
@@ -24,7 +25,13 @@ dataset:
   train_split: 0.70
   val_split: 0.15
   test_split: 0.15
-  augment_training: false
+  source_mode: "auto"   # auto, hybrid, sweep_runs, sequence_dirs
+  include_baseline_runs: true
+  baseline_runs_in_train: true
+  run_split_seed: 42
+  run_train_ratio: 0.50
+  run_val_ratio: 0.25
+  run_test_ratio: 0.25
 
 # Features extracted from SLAM internals
 features:
