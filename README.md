@@ -235,7 +235,38 @@ Interpretation:
 
 ---
 
-## 6. Current Takeaway
+## 6. Main Findings
+
+The current repository supports four defensible conclusions:
+
+1. **The full self-aware pipeline works end to end.**
+   VIO runtime, metric export, offline reliability inference, degradation replay, GUI generation, and benchmark analysis are all integrated into one reproducible workflow.
+
+2. **Mixed diagnostic datasets can make the learned task look easier than it really is.**
+   Earlier percentile-based results showed promising learnability, but those results did not survive stricter feature-aligned replay evaluation.
+
+3. **Feature semantics and evaluation protocol matter as much as model architecture.**
+   The project explicitly checked sequence-held-out splitting, label construction, lead-time behavior, runtime-vs-train feature alignment, and heuristic-vs-learned head-to-head comparisons.
+
+4. **The currently deployable runtime path is heuristic-primary.**
+   Learned outputs remain useful as auxiliary signals and research artifacts, but they are not yet strong enough to replace the primary runtime score.
+
+---
+
+## 7. Limitations
+
+This repository does **not** claim that learned failure prediction is solved.
+
+Current limitations are:
+
+- learned heads are weaker than the deployed primary score on the aligned replay benchmark,
+- runtime validity is moderate rather than strong,
+- lead-time evidence is limited, so strong early-warning claims are not justified,
+- the current system is a research prototype, not a production SLAM stack.
+
+---
+
+## 8. Current Takeaway
 
 The strongest defensible summary is:
 
@@ -250,7 +281,7 @@ In short:
 
 ---
 
-## 7. Benchmark Figure
+## 9. Benchmark Figure
 
 Current one-page summary figure:
 
@@ -258,7 +289,15 @@ Current one-page summary figure:
 
 ---
 
-## 8. Status
+## 10. Reproducibility Notes
+
+- EuRoC data is expected to live outside the repository and is not bundled here.
+- Large training artifacts, local packaged datasets, and private/internal notes are intentionally excluded from the public GitHub repository.
+- The public repository is meant to expose the **pipeline, code, benchmark logic, and current conclusions**, not every local experimental byproduct.
+
+---
+
+## 11. Status
 
 Current repository status:
 
@@ -269,7 +308,7 @@ Current repository status:
 
 ---
 
-## 9. Note
+## 12. Note
 
 This repository is structured as a research prototype rather than a production C++ SLAM stack.
 

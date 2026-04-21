@@ -58,3 +58,7 @@ README_交付版.md
 README_教学指南.md
 README_自感知模型详解.md
 README_运行指南.md
+
+# Local reference artifacts not needed in the public repo
+self_aware_slam/Self-Aware SLAM_ Learning to Predict Failure and Uncertainty in Visual-Inertial Localization.pdf
+VIO-SLAM/reference/slam_reference.ipynb
