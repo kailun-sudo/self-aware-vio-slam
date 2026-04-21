@@ -108,9 +108,18 @@ Key files:
 
 ---
 
-## 4. How To Use
+## 4. Module Documentation
 
-### 4.1 Run the main VIO pipeline
+Public module-level documentation:
+
+- [VIO-SLAM runtime README](VIO-SLAM/README.md)
+- [VIO-SLAM reference notes](VIO-SLAM/reference/README.md)
+
+---
+
+## 5. How To Use
+
+### 5.1 Run the main VIO pipeline
 
 ```bash
 cd VIO-SLAM
@@ -126,7 +135,7 @@ Key outputs:
 - `trajectory.txt`
 - `trajectory.pkl`
 
-### 4.2 Run offline self-awareness inference
+### 5.2 Run offline self-awareness inference
 
 ```bash
 cd ..
@@ -144,7 +153,7 @@ Key outputs:
 - `reliability_predictions.csv`
 - `summary.txt`
 
-### 4.3 Generate the local GUI
+### 5.3 Generate the local GUI
 
 ```bash
 self_aware_slam/venv/bin/python integration/create_visual_demo.py \
@@ -160,7 +169,7 @@ Open:
 outputs/mh01_gui/visual_demo.html
 ```
 
-### 4.4 Run a multi-sequence degradation replay sweep
+### 5.4 Run a multi-sequence degradation replay sweep
 
 ```bash
 self_aware_slam/venv/bin/python integration/run_multisequence_degradation_sweep.py \
@@ -177,7 +186,7 @@ Key outputs:
 - `outputs/multisequence_degradation_grid/report/multi_sequence_summary.txt`
 - `outputs/multisequence_degradation_grid/report/visual_demo.html`
 
-### 4.5 Run the validity benchmark
+### 5.5 Run the validity benchmark
 
 ```bash
 self_aware_slam/venv/bin/python integration/run_model_validity_benchmark.py \
@@ -196,9 +205,9 @@ Key outputs:
 
 ---
 
-## 5. Current Results
+## 6. Current Results
 
-### 5.1 Diagnostic learned-task results
+### 6.1 Diagnostic learned-task results
 
 Under the earlier strict held-out percentile task on the mixed diagnostic dataset:
 
@@ -210,7 +219,7 @@ These results showed that short-horizon failure discrimination was learnable in 
 
 However, these should **not** be treated as the final trustworthy model result.
 
-### 5.2 Aligned full-pipeline result
+### 6.2 Aligned full-pipeline result
 
 After feature-semantics alignment and stricter replay evaluation, the current practical runtime result is:
 
@@ -235,7 +244,7 @@ Interpretation:
 
 ---
 
-## 6. Main Findings
+## 7. Main Findings
 
 The current repository supports four defensible conclusions:
 
@@ -253,7 +262,7 @@ The current repository supports four defensible conclusions:
 
 ---
 
-## 7. Limitations
+## 8. Limitations
 
 This repository does **not** claim that learned failure prediction is solved.
 
@@ -266,7 +275,7 @@ Current limitations are:
 
 ---
 
-## 8. Current Takeaway
+## 9. Current Takeaway
 
 The strongest defensible summary is:
 
@@ -281,7 +290,7 @@ In short:
 
 ---
 
-## 9. Benchmark Figure
+## 10. Benchmark Figure
 
 Current one-page summary figure:
 
@@ -289,7 +298,7 @@ Current one-page summary figure:
 
 ---
 
-## 10. Reproducibility Notes
+## 11. Reproducibility Notes
 
 - EuRoC data is expected to live outside the repository and is not bundled here.
 - Large training artifacts, local packaged datasets, and private/internal notes are intentionally excluded from the public GitHub repository.
@@ -297,7 +306,7 @@ Current one-page summary figure:
 
 ---
 
-## 11. Status
+## 12. Status
 
 Current repository status:
 
@@ -308,7 +317,7 @@ Current repository status:
 
 ---
 
-## 12. Note
+## 13. Note
 
 This repository is structured as a research prototype rather than a production C++ SLAM stack.
 

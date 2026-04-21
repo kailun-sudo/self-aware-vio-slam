@@ -1,68 +1,85 @@
 # VIO-SLAM
 
-这是当前统一项目里的主 SLAM 系统。
+This directory contains the main Python **visual-inertial SLAM runtime** used by the project.
 
-## 当前主线
+It is the front end of the full self-aware pipeline described in the repository root `README.md`.
 
-当前 `VIO-SLAM` 已经切换为一条清晰主线：
+## Purpose
 
-- `run_pipeline.py`：唯一推荐的运行入口
-- `vio_pipeline.py`：从已验证 notebook 提炼出的纯 Python 主 pipeline
-- `config/default.yaml`：当前主配置
+`VIO-SLAM` is responsible for:
 
-这条主线直接完成：
+- loading EuRoC-style `mav0` data,
+- running the notebook-derived sliding-window VIO pipeline,
+- exporting trajectory estimates,
+- and exporting internal SLAM metrics for downstream self-awareness analysis.
 
-- 读取 EuRoC `mav0` 数据
-- 运行 notebook 版本的 sliding-window VIO
-- 导出 `slam_metrics.csv`
-- 导出 `estimated_tum.txt`
-- 导出 `trajectory.txt` / `trajectory.pkl`
+The recommended runtime entrypoint is:
 
-## 目录说明
+- `run_pipeline.py`
+
+The main pipeline implementation lives in:
+
+- `vio_pipeline.py`
+
+## Directory Layout
 
 ```text
 VIO-SLAM/
 ├── config/
 │   └── default.yaml
-├── legacy_python_vio_slam/
 ├── reference/
-│   └── slam_reference.ipynb
+│   └── README.md
 ├── requirements.txt
 ├── run_pipeline.py
 └── vio_pipeline.py
 ```
 
-- `legacy_python_vio_slam/`：原来的打包版 Python 实现，已经降级为 legacy
-- `reference/`：保留原始 notebook，仅作来源参考，不再作为运行入口
+## Recommended Usage
 
-## 运行
-
-如果数据放在默认位置：
-
-```text
-VIO-SLAM/data/mav0
-```
-
-直接执行：
+If your EuRoC sequence is stored at a custom location:
 
 ```bash
-cd /Users/kailunwang/Desktop/ossa/VIO-SLAM
-./.venv/bin/python run_pipeline.py \
-  --output /Users/kailunwang/Desktop/ossa/outputs/mh01
-```
-
-如果数据在别的地方：
-
-```bash
-cd /Users/kailunwang/Desktop/ossa/VIO-SLAM
+cd /path/to/ossa/VIO-SLAM
 ./.venv/bin/python run_pipeline.py \
   --data_path /path/to/EuRoC/MH_01_easy/mav0 \
-  --output /Users/kailunwang/Desktop/ossa/outputs/mh01
+  --output ../outputs/mh01
 ```
 
-输出重点看：
+If your local setup uses the default repository layout, you can point to a sequence under `VIO-SLAM/data/sequences/...`.
+
+## Main Outputs
+
+The most important exported files are:
 
 - `slam_metrics.csv`
 - `estimated_tum.txt`
+- `trajectory.txt`
+- `trajectory.pkl`
 
-这两个文件会被 `self_aware_slam` 和 `integration/run_offline_unified_demo.py` 继续使用。
+These files are consumed downstream by:
+
+- `integration/run_offline_unified_demo.py`
+- the self-awareness inference stack in `self_aware_slam/`
+
+## Role in the Full Project
+
+At the repository level, the runtime stack is:
+
+```text
+EuRoC mav0
+  -> VIO-SLAM/run_pipeline.py
+  -> slam_metrics.csv + estimated_tum.txt
+  -> integration/run_offline_unified_demo.py
+  -> pose_errors.csv + reliability_predictions.csv
+```
+
+In other words:
+
+- `VIO-SLAM/` produces motion estimates and internal SLAM signals
+- `self_aware_slam/` turns those signals into runtime reliability outputs
+- `integration/` provides replay, benchmarking, and visualization scripts
+
+## Notes
+
+- This is a **research runtime**, not a production C++ SLAM system.
+- The public repository keeps the runnable extracted pipeline here and avoids shipping large local datasets or private experimental artifacts.
