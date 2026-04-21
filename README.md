@@ -1,130 +1,166 @@
 # Self-Aware VIO-SLAM
 
-An end-to-end research systems project that combines a notebook-derived visual-inertial SLAM pipeline with a learned self-awareness module for localization reliability prediction.
+An end-to-end research prototype for **self-aware visual-inertial SLAM**.
 
-The project turns internal SLAM signals into online and offline estimates of:
+This project combines:
 
-- `failure_probability`
-- `confidence_score`
-- `predicted_pose_error`
+- a notebook-derived Python VIO-SLAM runtime,
+- internal SLAM metric export,
+- offline and online reliability inference,
+- degradation replay benchmarking,
+- and interactive visualization for baseline-vs-degraded comparison.
+
+The goal is not only to estimate pose, but also to estimate **how trustworthy the current localization state is**.
+
+---
+
+## 1. What This Project Does
+
+The system turns internal SLAM signals into runtime risk estimates.
+
+Current outputs include:
+
+- `primary_risk_score`
+- `primary_confidence_score`
+- `learned_failure_probability`
+- `learned_predicted_pose_error`
 - `predicted_localization_reliability`
 
-## What Is In This Repository
+At the current stage, the shipped runtime path is:
 
-- `VIO-SLAM/`
-  Main visual-inertial SLAM runtime. It reads EuRoC `mav0`, runs IMU preintegration + sliding-window optimization, and exports `slam_metrics.csv` and trajectories.
-- `self_aware_slam/`
-  Reliability prediction module. It performs feature engineering, temporal-window inference, and streaming/online prediction.
-- `integration/`
-  Bridge scripts for offline evaluation, online demo generation, batch runs, and visualization.
+- **heuristic-primary**
+- **learned-auxiliary**
 
-## System Overview
+That means the user-facing runtime score is currently a heuristic-based primary signal, while learned outputs are retained for analysis and future research.
+
+---
+
+## 2. End-to-End Pipeline
+
+The full pipeline is:
 
 ```text
 EuRoC mav0
   -> VIO-SLAM/run_pipeline.py
   -> slam_metrics.csv + estimated_tum.txt
-  -> self_aware_slam inference
-  -> confidence / failure probability / predicted error
-  -> analysis + GUI demo
+  -> integration/run_offline_unified_demo.py
+  -> pose_errors.csv + reliability_predictions.csv
+  -> benchmark / analysis / GUI / dataset building
 ```
 
-## Main Capabilities
+More concretely:
 
-- Offline unified pipeline from SLAM output to self-aware prediction
-- Online predictor sidecar attached to the VIO loop
-- CSV export of internal tracking and optimization metrics
-- Interactive local GUI demo for trajectory risk playback
-- EuRoC playback with controllable camera / IMU degradation injection
-- Baseline-vs-degraded comparison GUI for self-awareness stress testing
-- Multi-sequence degradation sweep with composite scenarios, severity grids, benchmark tables, and interactive HTML report
-- Model validity benchmark with correlation, ROC, calibration, and heuristic comparisons
-- Packaging of unified runs into reusable training-ready sequences
-- V2 self-awareness training pipeline with unified future-error targets and trend-aware learning features
+1. **VIO-SLAM runtime**
+   - reads EuRoC `mav0`
+   - runs the Python visual-inertial sliding-window pipeline
+   - exports trajectories and internal metrics
 
-## Demo Screenshots
+2. **Offline self-awareness bridge**
+   - aligns estimated trajectory with ground truth
+   - computes pose error
+   - runs self-aware inference
 
-Trajectory colored by online failure probability:
+3. **Runtime / benchmark layer**
+   - generates `primary_*` and `learned_*` outputs
+   - builds replay benchmarks
+   - compares baseline vs degraded runs
+   - produces sequence-level and frame-level evaluation summaries
 
-![Online trajectory risk map](docs/assets/online_trajectory_risk_map.png)
+---
 
-Interactive dashboard source view:
+## 3. Repository Layout
 
-![Online system dashboard](docs/assets/online_system_dashboard.png)
+```text
+ossa/
+├── VIO-SLAM/
+├── self_aware_slam/
+├── integration/
+├── outputs/
+└── docs/assets/
+```
 
-Baseline-vs-degraded playback comparison:
+### `VIO-SLAM/`
+Main Python VIO-SLAM runtime.
 
-![Degradation comparison overview](docs/assets/degradation_comparison_overview.png)
+Key files:
 
-![Multi-sequence degradation overview](docs/assets/multi_sequence_overview.png)
+- `VIO-SLAM/run_pipeline.py`
+- `VIO-SLAM/vio_pipeline.py`
 
-## Quick Start
+### `self_aware_slam/`
+Reliability inference, dataset building, training, and runtime scoring.
 
-Run the main VIO pipeline:
+Key files:
+
+- `self_aware_slam/src/models/inference.py`
+- `self_aware_slam/src/data/dataset_builder.py`
+- `self_aware_slam/src/models/train.py`
+
+### `integration/`
+Bridging scripts for replay, analysis, visualization, and benchmarking.
+
+Key files:
+
+- `integration/run_offline_unified_demo.py`
+- `integration/create_visual_demo.py`
+- `integration/run_multisequence_degradation_sweep.py`
+- `integration/run_model_validity_benchmark.py`
+
+---
+
+## 4. How To Use
+
+### 4.1 Run the main VIO pipeline
 
 ```bash
 cd VIO-SLAM
 ./.venv/bin/python run_pipeline.py \
+  --data_path /path/to/EuRoC/MH_01_easy/mav0 \
   --output ../outputs/mh01
 ```
 
-Run the offline self-aware bridge:
+Key outputs:
+
+- `slam_metrics.csv`
+- `estimated_tum.txt`
+- `trajectory.txt`
+- `trajectory.pkl`
+
+### 4.2 Run offline self-awareness inference
 
 ```bash
 cd ..
 self_aware_slam/venv/bin/python integration/run_offline_unified_demo.py \
   --metrics outputs/mh01/slam_metrics.csv \
   --estimated outputs/mh01/estimated_tum.txt \
-  --groundtruth VIO-SLAM/data/mav0/state_groundtruth_estimate0/data.csv \
+  --groundtruth /path/to/EuRoC/MH_01_easy/mav0/state_groundtruth_estimate0/data.csv \
   --output-dir outputs/mh01_self_aware \
   --config self_aware_slam/configs/config.yaml
 ```
 
-Run the online version:
+Key outputs:
+
+- `pose_errors.csv`
+- `reliability_predictions.csv`
+- `summary.txt`
+
+### 4.3 Generate the local GUI
 
 ```bash
-cd VIO-SLAM
-./.venv/bin/python run_pipeline.py \
-  --output ../outputs/mh01_online \
-  --enable_online_self_aware
-```
-
-Generate the local interactive GUI demo:
-
-```bash
-cd ..
 self_aware_slam/venv/bin/python integration/create_visual_demo.py \
-  --metrics outputs/mh01_online/slam_metrics.csv \
-  --predictions outputs/mh01_online/online_predictions.csv \
-  --estimated outputs/mh01_online/estimated_tum.txt \
-  --output-dir outputs/mh01_online_gui
+  --metrics outputs/mh01_self_aware/slam_metrics.csv \
+  --predictions outputs/mh01_self_aware/reliability_predictions.csv \
+  --estimated outputs/mh01_self_aware/estimated.txt \
+  --output-dir outputs/mh01_gui
 ```
 
-Then open:
+Open:
 
 ```text
-outputs/mh01_online_gui/visual_demo.html
+outputs/mh01_gui/visual_demo.html
 ```
 
-Run EuRoC playback with degradation injection and generate the comparison GUI:
-
-```bash
-self_aware_slam/venv/bin/python integration/run_euroc_degradation_demo.py \
-  --data-path VIO-SLAM/data/mav0 \
-  --camera-degradation motion_blur \
-  --imu-degradation bias_drift \
-  --severity 0.6 \
-  --downsample 120 \
-  --output-root outputs/euroc_degradation_quick
-```
-
-Then open:
-
-```text
-outputs/euroc_degradation_quick/comparison/gui/visual_demo.html
-```
-
-Run a representative multi-sequence sweep across five EuRoC Machine Hall sequences:
+### 4.4 Run a multi-sequence degradation replay sweep
 
 ```bash
 self_aware_slam/venv/bin/python integration/run_multisequence_degradation_sweep.py \
@@ -135,91 +171,111 @@ self_aware_slam/venv/bin/python integration/run_multisequence_degradation_sweep.
   --output-root outputs/multisequence_degradation_grid
 ```
 
-Then open:
+Key outputs:
 
-```text
-outputs/multisequence_degradation_grid/report/visual_demo.html
-```
+- `outputs/multisequence_degradation_grid/sweep_results.csv`
+- `outputs/multisequence_degradation_grid/report/multi_sequence_summary.txt`
+- `outputs/multisequence_degradation_grid/report/visual_demo.html`
 
-The aggregate report also writes stable benchmark tables:
-
-- `outputs/multisequence_degradation_grid/report/benchmark_runs.csv`
-- `outputs/multisequence_degradation_grid/report/benchmark_scenario_severity.csv`
-- `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.csv`
-- `outputs/multisequence_degradation_grid/report/benchmark_failure_delta_pivot.md`
-
-Build the v2 training dataset for a more learnable self-awareness task:
-
-```bash
-cd self_aware_slam
-./venv/bin/python -m src.data.dataset_builder
-```
-
-This writes:
-
-- `self_aware_slam/results/train_dataset_v2.pkl`
-
-The v2 dataset differs from the currently deployed runtime model in two ways:
-
-- it uses a **future** target (`future_max_pose_error` over the next 5 frames)
-- it uses **22 trend-aware learning features** instead of the current 7-D runtime feature set
-- it now prefers a **hybrid training source**: long baseline sequence dirs + degraded replay runs
-- degraded replay runs are split by **sequence-aware replay family** (currently `(sequence, base_scenario)`), so the same replay family does not cross train/val/test
-- the builder now prints **selected source / replay-run count / fallback status** so source selection is auditable
-- the default split protocol is **`family_aware_dev`**; use `--split-protocol sequence_held_out` for a strict cross-sequence benchmark dataset
-- the default `prediction_horizon` is now **5**, which retains the public `MH_04/MH_05` degraded replay runs and writes dataset diagnostics (`y_error` histograms + retained-run summaries)
-
-Train directly on the default dev dataset:
-
-```bash
-cd self_aware_slam
-./venv/bin/python -m src.models.train \
-  --config configs/config.yaml \
-  --model transformer \
-  --dataset-path results/train_dataset_v2.pkl
-```
-
-Train directly on the strict held-out dataset:
-
-```bash
-cd self_aware_slam
-./venv/bin/python -m src.models.train \
-  --config configs/config.yaml \
-  --model transformer \
-  --dataset-path results/train_dataset_v2_sequence_held_out.pkl
-```
-
-Validate whether the currently deployed predictor is actually aligned with real pose error:
+### 4.5 Run the validity benchmark
 
 ```bash
 self_aware_slam/venv/bin/python integration/run_model_validity_benchmark.py \
-  --sweep-results outputs/multisequence_degradation_grid/sweep_results.csv \
-  --output-dir outputs/multisequence_degradation_grid/model_validity \
-  --failure-thresholds 0.3,1.0,3.0 \
-  --summary-threshold 3.0
+  --sweep-results outputs/multisequence_degradation_aligned_seedgrid/sweep_results.csv \
+  --output-dir outputs/multisequence_degradation_aligned_seedgrid/model_validity_primary \
+  --failure-thresholds 3.0,6.0,8.0 \
+  --summary-threshold 6.0
 ```
 
-This produces:
+Key outputs:
 
-- `outputs/multisequence_degradation_grid/model_validity/validity_summary.txt`
-- `outputs/multisequence_degradation_grid/model_validity/threshold_metrics.csv`
-- `outputs/multisequence_degradation_grid/model_validity/run_level_correlations.csv`
-- `outputs/multisequence_degradation_grid/model_validity/sequence_validity_summary.csv`
-- `outputs/multisequence_degradation_grid/model_validity/scenario_validity_summary.csv`
+- `validity_summary.txt`
+- `threshold_metrics.csv`
+- `sequence_validity_summary.csv`
+- `run_level_correlations.csv`
 
-## Documentation
+---
 
-The original Chinese documentation is intentionally kept unchanged for internal use:
+## 5. Current Results
 
-- [README_运行指南.md](README_运行指南.md)
-- [README_教学指南.md](README_教学指南.md)
-- [README_自感知模型详解.md](README_自感知模型详解.md)
-- [README_修复与试错记录.md](README_修复与试错记录.md)
-- [README_交付版.md](README_交付版.md)
+### 5.1 Diagnostic learned-task results
 
-## Current Scope
+Under the earlier strict held-out percentile task on the mixed diagnostic dataset:
 
-- The main SLAM runtime is a notebook-derived Python VIO pipeline, not a full C++ ORB-SLAM3 codebase
-- The deployed self-aware model is integrated and runnable, but model-validity benchmark results show that its ranking/calibration quality is still weak
-- A v2 training path now exists with unified future targets and trend-aware features; it is intended to replace the current task definition rather than the current runtime checkpoint immediately
-- The current repository is optimized for a strong research prototype / portfolio project rather than production deployment
+- `P80`: `ROC-AUC = 0.798`, `PR-AUC = 0.739`
+- `P85`: `ROC-AUC = 0.835`, `PR-AUC = 0.759`
+- `P90`: `ROC-AUC = 0.864`, `PR-AUC = 0.747`
+
+These results showed that short-horizon failure discrimination was learnable in a diagnostic setting.
+
+However, these should **not** be treated as the final trustworthy model result.
+
+### 5.2 Aligned full-pipeline result
+
+After feature-semantics alignment and stricter replay evaluation, the current practical runtime result is:
+
+- benchmark scope:
+  - `5` sequences
+  - `120` degraded runs
+  - `1775` frame-level samples
+
+At the representative `6.0m` frame-level failure threshold:
+
+- `primary_failure_probability_roc_auc = 0.570`
+- `primary_failure_probability_ap = 0.314`
+- `learned_failure_probability_roc_auc = 0.486`
+- `learned_predicted_pose_error_roc_auc = 0.516`
+- `best_single_heuristic_roc_auc = 0.537`
+
+Interpretation:
+
+- the shipped **primary runtime score** is stronger than the learned failure head,
+- it is also slightly stronger than the best single heuristic on the larger replay benchmark,
+- but the overall result is still **moderate**, not strong enough to claim robust predictive validity.
+
+---
+
+## 6. Current Takeaway
+
+The strongest defensible summary is:
+
+> This repository is a research-grade self-aware VIO-SLAM prototype with a full replay-and-benchmark stack. The current deployable runtime design is heuristic-primary, while learned outputs remain auxiliary signals for analysis and future model development.
+
+In short:
+
+- the system works end to end,
+- the evaluation stack is strict and reproducible,
+- the learned story is not yet fully validated,
+- the current runtime path is **practical and conservative** rather than overclaimed.
+
+---
+
+## 7. Benchmark Figure
+
+Current one-page summary figure:
+
+![Heuristic-primary benchmark summary](docs/assets/primary_benchmark_summary.png)
+
+---
+
+## 8. Status
+
+Current repository status:
+
+- runtime delivery path: **heuristic-primary**
+- learned path: **auxiliary / diagnostic**
+- benchmark status: **moderate runtime validity, not strong predictive validity**
+- research status: **prototype complete, model story still open**
+
+---
+
+## 9. Note
+
+This repository is structured as a research prototype rather than a production C++ SLAM stack.
+
+The main value of the project is:
+
+- full end-to-end self-awareness integration,
+- reproducible replay evaluation,
+- runtime risk visualization,
+- and careful separation between diagnostic learned results and currently defensible deployable behavior.
