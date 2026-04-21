@@ -103,8 +103,15 @@ def run_demo(metrics_path: str,
         handle.write('Offline unified demo summary\n')
         handle.write(f'matched_poses: {len(matched)}\n')
         handle.write(f'pose_error_mean: {pose_errors["pose_error"].mean():.6f}\n')
-        handle.write(f'confidence_mean: {predictions["confidence_score"].mean():.6f}\n')
-        handle.write(f'failure_probability_mean: {predictions["failure_probability"].mean():.6f}\n')
+        handle.write(f'learned_confidence_mean: {predictions["confidence_score"].mean():.6f}\n')
+        handle.write(f'learned_failure_probability_mean: {predictions["failure_probability"].mean():.6f}\n')
+        if 'primary_risk_source' in predictions.columns:
+            primary_source = predictions['primary_risk_source'].dropna().iloc[0] if predictions['primary_risk_source'].notna().any() else 'unknown'
+            handle.write(f'primary_risk_source: {primary_source}\n')
+        if 'primary_confidence_score' in predictions.columns:
+            handle.write(f'primary_confidence_mean: {predictions["primary_confidence_score"].mean():.6f}\n')
+        if 'primary_risk_score' in predictions.columns:
+            handle.write(f'primary_failure_probability_mean: {predictions["primary_risk_score"].mean():.6f}\n')
 
     return {
         'metrics_path': packaged_metrics,

@@ -38,6 +38,23 @@ def _slug(value: float) -> str:
     return str(value).replace(".", "p")
 
 
+def _rank_normalize(series: pd.Series) -> pd.Series:
+    values = pd.to_numeric(series, errors="coerce")
+    ranks = pd.Series(np.nan, index=series.index, dtype=float)
+    mask = np.isfinite(values.to_numpy(dtype=float))
+    if not np.any(mask):
+        return ranks
+    ranked = values[mask].rank(method="average", pct=True).astype(float)
+    ranks.loc[mask] = ranked.to_numpy(dtype=float)
+    return ranks
+
+
+def _rank_average(a: pd.Series, b: pd.Series) -> pd.Series:
+    a_rank = _rank_normalize(a)
+    b_rank = _rank_normalize(b)
+    return 0.5 * (a_rank + b_rank)
+
+
 def _safe_corr(a: pd.Series, b: pd.Series, method: str = "pearson") -> float:
     frame = pd.concat([a, b], axis=1).replace([np.inf, -np.inf], np.nan).dropna()
     if len(frame) < 2:
@@ -160,10 +177,13 @@ def _best_f1(y_true: np.ndarray, scores: np.ndarray) -> Dict[str, float]:
 
 
 def _score_definitions(frame_data: pd.DataFrame) -> Dict[str, pd.Series]:
-    scores: Dict[str, pd.Series] = {
-        "model_failure_probability": frame_data["failure_probability"],
-        "model_predicted_pose_error": frame_data["predicted_pose_error"],
-    }
+    scores: Dict[str, pd.Series] = {}
+    if "failure_probability" in frame_data.columns:
+        scores["learned_failure_probability"] = frame_data["failure_probability"]
+    if "predicted_pose_error" in frame_data.columns:
+        scores["learned_predicted_pose_error"] = frame_data["predicted_pose_error"]
+    if "primary_risk_score" in frame_data.columns:
+        scores["primary_failure_probability"] = frame_data["primary_risk_score"]
     if "inlier_ratio" in frame_data.columns:
         scores["heuristic_inlier_ratio_risk"] = 1.0 - frame_data["inlier_ratio"]
     if "pose_optimization_residual" in frame_data.columns:
@@ -173,6 +193,26 @@ def _score_definitions(frame_data: pd.DataFrame) -> Dict[str, pd.Series]:
         scores["heuristic_num_inliers_risk"] = -frame_data["num_inliers"]
     if "mean_epipolar_error" in frame_data.columns:
         scores["heuristic_epipolar_error_risk"] = frame_data["mean_epipolar_error"]
+    if "learned_failure_probability" in scores and "heuristic_epipolar_error_risk" in scores:
+        scores["fusion_failure_epipolar_rankavg"] = _rank_average(
+            scores["learned_failure_probability"],
+            scores["heuristic_epipolar_error_risk"],
+        )
+    if "learned_failure_probability" in scores and "heuristic_num_inliers_risk" in scores:
+        scores["fusion_failure_num_inliers_rankavg"] = _rank_average(
+            scores["learned_failure_probability"],
+            scores["heuristic_num_inliers_risk"],
+        )
+    if "learned_predicted_pose_error" in scores and "heuristic_epipolar_error_risk" in scores:
+        scores["fusion_pred_error_epipolar_rankavg"] = _rank_average(
+            scores["learned_predicted_pose_error"],
+            scores["heuristic_epipolar_error_risk"],
+        )
+    if "learned_predicted_pose_error" in scores and "heuristic_num_inliers_risk" in scores:
+        scores["fusion_pred_error_num_inliers_rankavg"] = _rank_average(
+            scores["learned_predicted_pose_error"],
+            scores["heuristic_num_inliers_risk"],
+        )
     return scores
 
 
@@ -294,7 +334,7 @@ def _evaluate_score(y_true: np.ndarray, scores: np.ndarray, score_name: str) -> 
     metrics["average_precision"] = _average_precision_from_curve(curve["recall"], curve["precision"])
     metrics.update(_best_f1(y_true, scores))
 
-    if score_name == "model_failure_probability":
+    if score_name.endswith("failure_probability"):
         fixed_pred = (scores >= 0.5).astype(int)
         fixed = _binary_metrics(y_true, fixed_pred)
         metrics["fixed_f1"] = fixed["f1"]
@@ -320,10 +360,15 @@ def _run_level_correlations(frame_data: pd.DataFrame) -> pd.DataFrame:
     for keys, group in frame_data.groupby(group_columns, dropna=False):
         record = dict(zip(group_columns, keys))
         record["num_frames"] = int(len(group))
-        record["failure_vs_actual_pearson"] = _safe_corr(group["failure_probability"], group["actual_pose_error"])
-        record["failure_vs_actual_spearman"] = _safe_corr(group["failure_probability"], group["actual_pose_error"], method="spearman")
-        record["pred_error_vs_actual_pearson"] = _safe_corr(group["predicted_pose_error"], group["actual_pose_error"])
-        record["pred_error_vs_actual_spearman"] = _safe_corr(group["predicted_pose_error"], group["actual_pose_error"], method="spearman")
+        if "failure_probability" in group.columns:
+            record["learned_failure_vs_actual_pearson"] = _safe_corr(group["failure_probability"], group["actual_pose_error"])
+            record["learned_failure_vs_actual_spearman"] = _safe_corr(group["failure_probability"], group["actual_pose_error"], method="spearman")
+        if "predicted_pose_error" in group.columns:
+            record["learned_pred_error_vs_actual_pearson"] = _safe_corr(group["predicted_pose_error"], group["actual_pose_error"])
+            record["learned_pred_error_vs_actual_spearman"] = _safe_corr(group["predicted_pose_error"], group["actual_pose_error"], method="spearman")
+        if "primary_risk_score" in group.columns:
+            record["primary_failure_vs_actual_pearson"] = _safe_corr(group["primary_risk_score"], group["actual_pose_error"])
+            record["primary_failure_vs_actual_spearman"] = _safe_corr(group["primary_risk_score"], group["actual_pose_error"], method="spearman")
         if "inlier_ratio" in group.columns:
             record["heuristic_inlier_vs_actual_pearson"] = _safe_corr(1.0 - group["inlier_ratio"], group["actual_pose_error"])
         if "pose_optimization_residual" in group.columns:
@@ -333,30 +378,40 @@ def _run_level_correlations(frame_data: pd.DataFrame) -> pd.DataFrame:
 
 
 def _aggregate_correlations(run_correlations: pd.DataFrame, output_dir: Path) -> None:
-    sequence_summary = (
-        run_correlations.groupby("sequence_short", dropna=False)[
-            [
-                "failure_vs_actual_pearson",
-                "failure_vs_actual_spearman",
-                "pred_error_vs_actual_pearson",
-                "pred_error_vs_actual_spearman",
-            ]
+    sequence_metrics = [
+        column
+        for column in [
+            "learned_failure_vs_actual_pearson",
+            "learned_failure_vs_actual_spearman",
+            "learned_pred_error_vs_actual_pearson",
+            "learned_pred_error_vs_actual_spearman",
+            "primary_failure_vs_actual_pearson",
+            "primary_failure_vs_actual_spearman",
         ]
+        if column in run_correlations.columns
+    ]
+    sequence_summary = (
+        run_correlations.groupby("sequence_short", dropna=False)[sequence_metrics]
         .mean(numeric_only=True)
         .reset_index()
         .sort_values("sequence_short")
     )
     sequence_summary.to_csv(output_dir / "sequence_validity_summary.csv", index=False)
 
-    scenario_summary = (
-        run_correlations.groupby(["run_kind", "base_scenario"], dropna=False)[
-            [
-                "failure_vs_actual_pearson",
-                "failure_vs_actual_spearman",
-                "pred_error_vs_actual_pearson",
-                "pred_error_vs_actual_spearman",
-            ]
+    scenario_metrics = [
+        column
+        for column in [
+            "learned_failure_vs_actual_pearson",
+            "learned_failure_vs_actual_spearman",
+            "learned_pred_error_vs_actual_pearson",
+            "learned_pred_error_vs_actual_spearman",
+            "primary_failure_vs_actual_pearson",
+            "primary_failure_vs_actual_spearman",
         ]
+        if column in run_correlations.columns
+    ]
+    scenario_summary = (
+        run_correlations.groupby(["run_kind", "base_scenario"], dropna=False)[scenario_metrics]
         .mean(numeric_only=True)
         .reset_index()
         .sort_values(["run_kind", "base_scenario"])
@@ -420,31 +475,32 @@ def _calibration_bins(probabilities: np.ndarray, y_true: np.ndarray, bins: int =
 
 
 def _plot_scatter(frame_data: pd.DataFrame, output_dir: Path):
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    plots = []
+    if "failure_probability" in frame_data.columns:
+        plots.append(("failure_probability", "learned_failure_probability", "#c44536"))
+    if "primary_risk_score" in frame_data.columns:
+        plots.append(("primary_risk_score", "primary_failure_probability", "#7a3db8"))
+    if "predicted_pose_error" in frame_data.columns:
+        plots.append(("predicted_pose_error", "learned_predicted_pose_error", "#d17b0f"))
+    if not plots:
+        return
 
-    axes[0].scatter(
-        frame_data["actual_pose_error"],
-        frame_data["failure_probability"],
-        s=8,
-        alpha=0.35,
-        c=np.where(frame_data["run_kind"] == "degraded", "#c44536", "#2a6f97"),
-    )
-    axes[0].set_xlabel("actual_pose_error (m)")
-    axes[0].set_ylabel("failure_probability")
-    axes[0].set_title("Failure Probability vs Actual Pose Error")
-    axes[0].grid(True, alpha=0.25)
+    fig, axes = plt.subplots(1, len(plots), figsize=(7 * len(plots), 5))
+    if len(plots) == 1:
+        axes = [axes]
 
-    axes[1].scatter(
-        frame_data["actual_pose_error"],
-        frame_data["predicted_pose_error"],
-        s=8,
-        alpha=0.35,
-        c=np.where(frame_data["run_kind"] == "degraded", "#d17b0f", "#2a6f97"),
-    )
-    axes[1].set_xlabel("actual_pose_error (m)")
-    axes[1].set_ylabel("predicted_pose_error")
-    axes[1].set_title("Predicted Pose Error vs Actual Pose Error")
-    axes[1].grid(True, alpha=0.25)
+    for axis, (column, label, color) in zip(axes, plots):
+        axis.scatter(
+            frame_data["actual_pose_error"],
+            frame_data[column],
+            s=8,
+            alpha=0.35,
+            c=np.where(frame_data["run_kind"] == "degraded", color, "#2a6f97"),
+        )
+        axis.set_xlabel("actual_pose_error (m)")
+        axis.set_ylabel(label)
+        axis.set_title(f"{label} vs Actual Pose Error")
+        axis.grid(True, alpha=0.25)
 
     fig.tight_layout()
     fig.savefig(output_dir / "model_vs_actual_scatter.png")
@@ -458,8 +514,15 @@ def _plot_sequence_correlations(sequence_summary: pd.DataFrame, output_dir: Path
     width = 0.35
     fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharex=True)
 
-    axes[0].bar(x - width / 2, sequence_summary["failure_vs_actual_pearson"], width=width, label="failure_probability")
-    axes[0].bar(x + width / 2, sequence_summary["pred_error_vs_actual_pearson"], width=width, label="predicted_pose_error")
+    left_columns = []
+    if "learned_failure_vs_actual_pearson" in sequence_summary.columns:
+        left_columns.append(("learned_failure_vs_actual_pearson", "learned_failure_probability"))
+    if "primary_failure_vs_actual_pearson" in sequence_summary.columns:
+        left_columns.append(("primary_failure_vs_actual_pearson", "primary_failure_probability"))
+    if "learned_pred_error_vs_actual_pearson" in sequence_summary.columns:
+        left_columns.append(("learned_pred_error_vs_actual_pearson", "learned_predicted_pose_error"))
+    for idx, (column, label) in enumerate(left_columns):
+        axes[0].bar(x + (idx - (len(left_columns) - 1) / 2) * width, sequence_summary[column], width=width, label=label)
     axes[0].axhline(0.0, color="black", linewidth=0.8, alpha=0.4)
     axes[0].set_title("Pearson Correlation by Sequence")
     axes[0].set_xticks(x)
@@ -467,8 +530,15 @@ def _plot_sequence_correlations(sequence_summary: pd.DataFrame, output_dir: Path
     axes[0].grid(True, axis="y", alpha=0.25)
     axes[0].legend()
 
-    axes[1].bar(x - width / 2, sequence_summary["failure_vs_actual_spearman"], width=width, label="failure_probability")
-    axes[1].bar(x + width / 2, sequence_summary["pred_error_vs_actual_spearman"], width=width, label="predicted_pose_error")
+    right_columns = []
+    if "learned_failure_vs_actual_spearman" in sequence_summary.columns:
+        right_columns.append(("learned_failure_vs_actual_spearman", "learned_failure_probability"))
+    if "primary_failure_vs_actual_spearman" in sequence_summary.columns:
+        right_columns.append(("primary_failure_vs_actual_spearman", "primary_failure_probability"))
+    if "learned_pred_error_vs_actual_spearman" in sequence_summary.columns:
+        right_columns.append(("learned_pred_error_vs_actual_spearman", "learned_predicted_pose_error"))
+    for idx, (column, label) in enumerate(right_columns):
+        axes[1].bar(x + (idx - (len(right_columns) - 1) / 2) * width, sequence_summary[column], width=width, label=label)
     axes[1].axhline(0.0, color="black", linewidth=0.8, alpha=0.4)
     axes[1].set_title("Spearman Correlation by Sequence")
     axes[1].set_xticks(x)
@@ -487,8 +557,13 @@ def _plot_roc(frame_data: pd.DataFrame, threshold: float, output_dir: Path):
         return
     score_map = _score_definitions(frame_data)
     selected = [
-        "model_failure_probability",
-        "model_predicted_pose_error",
+        "primary_failure_probability",
+        "learned_failure_probability",
+        "learned_predicted_pose_error",
+        "fusion_failure_epipolar_rankavg",
+        "fusion_failure_num_inliers_rankavg",
+        "fusion_pred_error_epipolar_rankavg",
+        "fusion_pred_error_num_inliers_rankavg",
         "heuristic_inlier_ratio_risk",
         "heuristic_pose_residual_risk",
         "heuristic_num_inliers_risk",
@@ -517,9 +592,7 @@ def _plot_roc(frame_data: pd.DataFrame, threshold: float, output_dir: Path):
     plt.close(fig)
 
 
-def _plot_calibration(frame_data: pd.DataFrame, threshold: float, bins_frame: pd.DataFrame, output_dir: Path):
-    y_true = (frame_data["actual_pose_error"].to_numpy(dtype=float) >= threshold).astype(int)
-    probabilities = frame_data["failure_probability"].to_numpy(dtype=float)
+def _plot_calibration(probability_column: str, bins_frame: pd.DataFrame, threshold: float, output_dir: Path):
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.plot([0, 1], [0, 1], linestyle="--", color="black", alpha=0.5)
     valid = bins_frame["count"] > 0
@@ -532,10 +605,10 @@ def _plot_calibration(frame_data: pd.DataFrame, threshold: float, bins_frame: pd
     )
     ax.set_xlabel("Predicted failure probability")
     ax.set_ylabel("Observed failure rate")
-    ax.set_title(f"Calibration @ failure threshold {threshold:.2f} m")
+    ax.set_title(f"{probability_column} calibration @ failure threshold {threshold:.2f} m")
     ax.grid(True, alpha=0.25)
     fig.tight_layout()
-    fig.savefig(output_dir / f"calibration_t{_slug(threshold)}.png")
+    fig.savefig(output_dir / f"{probability_column}_calibration_t{_slug(threshold)}.png")
     plt.close(fig)
 
 
@@ -547,19 +620,28 @@ def _write_summary(
     summary_threshold: float,
 ):
     summary_path = output_dir / "validity_summary.txt"
-    model_failure = threshold_metrics[
+    primary_failure = threshold_metrics[
         (threshold_metrics["failure_threshold"] == summary_threshold)
-        & (threshold_metrics["score_name"] == "model_failure_probability")
+        & (threshold_metrics["score_name"] == "primary_failure_probability")
     ]
-    model_error = threshold_metrics[
+    learned_failure = threshold_metrics[
         (threshold_metrics["failure_threshold"] == summary_threshold)
-        & (threshold_metrics["score_name"] == "model_predicted_pose_error")
+        & (threshold_metrics["score_name"] == "learned_failure_probability")
+    ]
+    learned_error = threshold_metrics[
+        (threshold_metrics["failure_threshold"] == summary_threshold)
+        & (threshold_metrics["score_name"] == "learned_predicted_pose_error")
     ]
     heuristic_rows = threshold_metrics[
         (threshold_metrics["failure_threshold"] == summary_threshold)
         & threshold_metrics["score_name"].str.startswith("heuristic_")
     ].sort_values("roc_auc", ascending=False)
+    fusion_rows = threshold_metrics[
+        (threshold_metrics["failure_threshold"] == summary_threshold)
+        & threshold_metrics["score_name"].str.startswith("fusion_")
+    ].sort_values("roc_auc", ascending=False)
     best_heuristic = heuristic_rows.iloc[0] if not heuristic_rows.empty else None
+    best_fusion = fusion_rows.iloc[0] if not fusion_rows.empty else None
 
     with open(summary_path, "w", encoding="utf-8") as handle:
         handle.write("Model validity benchmark\n")
@@ -568,46 +650,75 @@ def _write_summary(
         handle.write(f"num_sequences: {frame_data['sequence'].nunique()}\n")
         handle.write(f"num_baseline_runs: {int((run_correlations['run_kind'] == 'baseline').sum())}\n")
         handle.write(f"num_degraded_runs: {int((run_correlations['run_kind'] == 'degraded').sum())}\n")
-        handle.write(
-            f"overall_failure_vs_actual_pearson: {_safe_corr(frame_data['failure_probability'], frame_data['actual_pose_error']):.6f}\n"
-        )
-        handle.write(
-            f"overall_failure_vs_actual_spearman: {_safe_corr(frame_data['failure_probability'], frame_data['actual_pose_error'], method='spearman'):.6f}\n"
-        )
-        handle.write(
-            f"overall_pred_error_vs_actual_pearson: {_safe_corr(frame_data['predicted_pose_error'], frame_data['actual_pose_error']):.6f}\n"
-        )
-        handle.write(
-            f"overall_pred_error_vs_actual_spearman: {_safe_corr(frame_data['predicted_pose_error'], frame_data['actual_pose_error'], method='spearman'):.6f}\n"
-        )
-        handle.write(
-            f"mean_run_failure_vs_actual_pearson: {run_correlations['failure_vs_actual_pearson'].mean():.6f}\n"
-        )
-        handle.write(
-            f"positive_failure_correlation_runs: {int((run_correlations['failure_vs_actual_pearson'] > 0).sum())}/{len(run_correlations)}\n"
-        )
+        if "failure_probability" in frame_data.columns:
+            handle.write(
+                f"overall_learned_failure_vs_actual_pearson: {_safe_corr(frame_data['failure_probability'], frame_data['actual_pose_error']):.6f}\n"
+            )
+            handle.write(
+                f"overall_learned_failure_vs_actual_spearman: {_safe_corr(frame_data['failure_probability'], frame_data['actual_pose_error'], method='spearman'):.6f}\n"
+            )
+            handle.write(
+                f"mean_run_learned_failure_vs_actual_pearson: {run_correlations['learned_failure_vs_actual_pearson'].mean():.6f}\n"
+            )
+            handle.write(
+                f"positive_learned_failure_correlation_runs: {int((run_correlations['learned_failure_vs_actual_pearson'] > 0).sum())}/{len(run_correlations)}\n"
+            )
+        if "primary_risk_score" in frame_data.columns:
+            handle.write(
+                f"overall_primary_failure_vs_actual_pearson: {_safe_corr(frame_data['primary_risk_score'], frame_data['actual_pose_error']):.6f}\n"
+            )
+            handle.write(
+                f"overall_primary_failure_vs_actual_spearman: {_safe_corr(frame_data['primary_risk_score'], frame_data['actual_pose_error'], method='spearman'):.6f}\n"
+            )
+            handle.write(
+                f"mean_run_primary_failure_vs_actual_pearson: {run_correlations['primary_failure_vs_actual_pearson'].mean():.6f}\n"
+            )
+            handle.write(
+                f"positive_primary_failure_correlation_runs: {int((run_correlations['primary_failure_vs_actual_pearson'] > 0).sum())}/{len(run_correlations)}\n"
+            )
+        if "predicted_pose_error" in frame_data.columns:
+            handle.write(
+                f"overall_learned_pred_error_vs_actual_pearson: {_safe_corr(frame_data['predicted_pose_error'], frame_data['actual_pose_error']):.6f}\n"
+            )
+            handle.write(
+                f"overall_learned_pred_error_vs_actual_spearman: {_safe_corr(frame_data['predicted_pose_error'], frame_data['actual_pose_error'], method='spearman'):.6f}\n"
+            )
         handle.write(f"summary_failure_threshold: {summary_threshold:.2f}\n")
 
-        if not model_failure.empty:
-            row = model_failure.iloc[0]
+        if not primary_failure.empty:
+            row = primary_failure.iloc[0]
             handle.write(
-                f"model_failure_probability_roc_auc: {row['roc_auc']:.6f}\n"
-                f"model_failure_probability_ap: {row['average_precision']:.6f}\n"
-                f"model_failure_probability_fixed_f1: {row['fixed_f1']:.6f}\n"
-                f"model_failure_probability_brier: {row['brier_score']:.6f}\n"
+                f"primary_failure_probability_roc_auc: {row['roc_auc']:.6f}\n"
+                f"primary_failure_probability_ap: {row['average_precision']:.6f}\n"
+                f"primary_failure_probability_fixed_f1: {row['fixed_f1']:.6f}\n"
+                f"primary_failure_probability_brier: {row['brier_score']:.6f}\n"
             )
-        if not model_error.empty:
-            row = model_error.iloc[0]
+        if not learned_failure.empty:
+            row = learned_failure.iloc[0]
             handle.write(
-                f"model_predicted_pose_error_roc_auc: {row['roc_auc']:.6f}\n"
-                f"model_predicted_pose_error_ap: {row['average_precision']:.6f}\n"
-                f"model_predicted_pose_error_best_f1: {row['best_f1']:.6f}\n"
+                f"learned_failure_probability_roc_auc: {row['roc_auc']:.6f}\n"
+                f"learned_failure_probability_ap: {row['average_precision']:.6f}\n"
+                f"learned_failure_probability_fixed_f1: {row['fixed_f1']:.6f}\n"
+                f"learned_failure_probability_brier: {row['brier_score']:.6f}\n"
+            )
+        if not learned_error.empty:
+            row = learned_error.iloc[0]
+            handle.write(
+                f"learned_predicted_pose_error_roc_auc: {row['roc_auc']:.6f}\n"
+                f"learned_predicted_pose_error_ap: {row['average_precision']:.6f}\n"
+                f"learned_predicted_pose_error_best_f1: {row['best_f1']:.6f}\n"
             )
         if best_heuristic is not None:
             handle.write(
                 f"best_heuristic_score: {best_heuristic['score_name']}\n"
                 f"best_heuristic_roc_auc: {best_heuristic['roc_auc']:.6f}\n"
                 f"best_heuristic_best_f1: {best_heuristic['best_f1']:.6f}\n"
+            )
+        if best_fusion is not None:
+            handle.write(
+                f"best_fusion_score: {best_fusion['score_name']}\n"
+                f"best_fusion_roc_auc: {best_fusion['roc_auc']:.6f}\n"
+                f"best_fusion_best_f1: {best_fusion['best_f1']:.6f}\n"
             )
 
 
@@ -633,10 +744,15 @@ def run_benchmark(
 
     for threshold in failure_thresholds:
         y_true = (frame_data["actual_pose_error"].to_numpy(dtype=float) >= threshold).astype(int)
-        bins_frame = _calibration_bins(frame_data["failure_probability"].to_numpy(dtype=float), y_true, bins=10)
-        bins_frame.to_csv(output_root / f"calibration_bins_t{_slug(threshold)}.csv", index=False)
+        if "failure_probability" in frame_data.columns:
+            bins_frame = _calibration_bins(frame_data["failure_probability"].to_numpy(dtype=float), y_true, bins=10)
+            bins_frame.to_csv(output_root / f"learned_failure_probability_calibration_bins_t{_slug(threshold)}.csv", index=False)
+            _plot_calibration("learned_failure_probability", bins_frame, threshold, output_root)
+        if "primary_risk_score" in frame_data.columns:
+            bins_frame = _calibration_bins(frame_data["primary_risk_score"].to_numpy(dtype=float), y_true, bins=10)
+            bins_frame.to_csv(output_root / f"primary_failure_probability_calibration_bins_t{_slug(threshold)}.csv", index=False)
+            _plot_calibration("primary_failure_probability", bins_frame, threshold, output_root)
         _plot_roc(frame_data, threshold, output_root)
-        _plot_calibration(frame_data, threshold, bins_frame, output_root)
 
     _plot_scatter(frame_data, output_root)
     sequence_summary = pd.read_csv(output_root / "sequence_validity_summary.csv")

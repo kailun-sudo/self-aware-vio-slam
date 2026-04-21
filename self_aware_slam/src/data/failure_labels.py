@@ -2,10 +2,15 @@
 Task 2.3: Failure/Target Definition
 
 Legacy helpers are kept for backward compatibility.
-V2 training uses unified future targets:
+V2 training supports multiple future-oriented targets:
 
-- regression target: future max pose error over the next H frames
-- classification target: future max pose error > threshold OR future tracking lost
+- future_window_max:
+  regression target = future max pose error over the next H frames
+- future_window_max_percentile:
+  same regression target, but classification threshold is derived from the
+  training-split percentile instead of a fixed meter threshold
+- future_error_growth:
+  regression target = positive future error growth over the next H frames
 """
 
 from __future__ import annotations
@@ -84,6 +89,59 @@ def create_future_error_targets(
     return targets
 
 
+def create_future_error_growth_targets(
+    pose_errors: pd.DataFrame | np.ndarray,
+    prediction_horizon: int = 10,
+    aggregation: str = 'max',
+    positive_only: bool = True,
+) -> np.ndarray:
+    """Create future error-growth targets over a fixed horizon.
+
+    Growth is defined as:
+
+        aggregated_future_error - current_error
+
+    When ``positive_only`` is true, negative growth is clipped to zero so the
+    regression target remains non-negative and stays compatible with the
+    current regression head.
+    """
+    if isinstance(pose_errors, pd.DataFrame):
+        values = pose_errors['pose_error'].values.astype(np.float32)
+    else:
+        values = np.asarray(pose_errors, dtype=np.float32)
+
+    future_error = create_future_error_targets(
+        pose_errors=values,
+        prediction_horizon=prediction_horizon,
+        aggregation=aggregation,
+    )
+    growth = future_error - values.astype(np.float32)
+    if positive_only:
+        growth = np.maximum(growth, 0.0)
+    return growth.astype(np.float32)
+
+
+def create_future_tracking_failure_targets(
+    slam_metrics: pd.DataFrame,
+    prediction_horizon: int = 10,
+) -> np.ndarray:
+    """Create future tracking-failure labels aligned with future targets."""
+    if 'tracking_state' not in slam_metrics.columns:
+        return np.zeros(len(slam_metrics), dtype=np.float32)
+
+    tracking_lost = (slam_metrics['tracking_state'].fillna(0).astype(int).values == 0).astype(np.float32)
+    tracking_failure = np.zeros(len(tracking_lost), dtype=np.float32)
+    for idx in range(len(tracking_lost)):
+        start = idx + 1
+        end = idx + prediction_horizon + 1
+        if end > len(tracking_lost):
+            break
+        if np.any(tracking_lost[start:end]):
+            tracking_failure[idx] = 1.0
+    tracking_failure[-prediction_horizon:] = np.nan
+    return tracking_failure
+
+
 def create_future_failure_labels(
     pose_errors: pd.DataFrame | np.ndarray,
     slam_metrics: pd.DataFrame,
@@ -101,15 +159,10 @@ def create_future_failure_labels(
     failure = (future_error > error_threshold).astype(np.float32)
 
     if use_tracking_state and 'tracking_state' in slam_metrics.columns:
-        tracking_lost = (slam_metrics['tracking_state'].fillna(0).astype(int).values == 0).astype(np.float32)
-        tracking_failure = np.zeros(len(tracking_lost), dtype=np.float32)
-        for idx in range(len(tracking_lost)):
-            start = idx + 1
-            end = idx + prediction_horizon + 1
-            if end > len(tracking_lost):
-                break
-            if np.any(tracking_lost[start:end]):
-                tracking_failure[idx] = 1.0
+        tracking_failure = create_future_tracking_failure_targets(
+            slam_metrics=slam_metrics,
+            prediction_horizon=prediction_horizon,
+        )
         failure = np.maximum(failure, tracking_failure)
 
     failure[np.isnan(future_error)] = np.nan

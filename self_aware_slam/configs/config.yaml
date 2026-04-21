@@ -27,6 +27,7 @@ dataset:
   test_split: 0.15
   source_mode: "auto"   # auto, hybrid, sweep_runs, sequence_dirs
   split_protocol: "family_aware_dev"  # family_aware_dev, sequence_held_out
+  feature_semantics_policy: "runtime_aligned"  # runtime_aligned, allow_mixed
   include_baseline_runs: true
   baseline_runs_in_train: true
   run_split_seed: 42
@@ -81,11 +82,13 @@ failure:
 
 # V2 learning target definition
 targets:
-  mode: "future_window_max"
+  mode: "future_window_max"  # future_window_max, future_window_max_percentile, future_error_growth
   prediction_horizon: 5
   regression_target: "future_max_pose_error"
   regression_aggregation: "max"
   classification_error_threshold: 0.18
+  classification_percentile: 0.90
+  classification_growth_threshold: 0.50
   use_tracking_lost: true
 
 # Degradation simulation

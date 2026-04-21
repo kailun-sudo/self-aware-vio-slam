@@ -52,6 +52,10 @@ def _write_summary(aligned: pd.DataFrame, output_dir: str):
     with open(output_path, "w", encoding="utf-8") as handle:
         handle.write("Degradation comparison GUI summary\n")
         handle.write(f"rows: {len(aligned)}\n")
+        if "baseline_risk_score_source" in aligned.columns:
+            handle.write(f"baseline_risk_score_source: {aligned['baseline_risk_score_source'].iloc[0]}\n")
+        if "degraded_risk_score_source" in aligned.columns:
+            handle.write(f"degraded_risk_score_source: {aligned['degraded_risk_score_source'].iloc[0]}\n")
         handle.write(
             f"baseline_failure_probability_mean: {aligned['baseline_failure_probability'].mean():.6f}\n"
         )
@@ -367,6 +371,8 @@ def _write_html(aligned: pd.DataFrame, output_dir: str):
         <div class="card"><strong>Degraded 平均失效概率</strong><span class="value">{aligned['degraded_failure_probability'].mean():.3f}</span></div>
         <div class="card"><strong>Baseline 平均置信度</strong><span class="value">{aligned['baseline_confidence_score'].mean():.3f}</span></div>
         <div class="card"><strong>Degraded 平均置信度</strong><span class="value">{aligned['degraded_confidence_score'].mean():.3f}</span></div>
+        <div class="card"><strong>Baseline 风险来源</strong><span class="value">{aligned['baseline_risk_score_source'].iloc[0] if 'baseline_risk_score_source' in aligned.columns else 'learned_failure_probability'}</span></div>
+        <div class="card"><strong>Degraded 风险来源</strong><span class="value">{aligned['degraded_risk_score_source'].iloc[0] if 'degraded_risk_score_source' in aligned.columns else 'learned_failure_probability'}</span></div>
       </div>
     </section>
 

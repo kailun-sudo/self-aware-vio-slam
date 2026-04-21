@@ -98,26 +98,38 @@ def _severity_slug(severity: float) -> str:
     return f"s{int(round(severity * 100)):02d}"
 
 
+def _seed_slug(seed: int) -> str:
+    return f"seed{seed}"
+
+
 def _build_scenario_instances(
     scenario_names: List[str],
     severity_grid: List[float],
+    degradation_seeds: List[int],
 ) -> List[Dict[str, object]]:
     instances: List[Dict[str, object]] = []
+    multiple_seeds = len(degradation_seeds) > 1
     for base_name in scenario_names:
         preset = SCENARIO_PRESETS[base_name]
         severities = severity_grid or [float(preset["severity"])]
         for severity in severities:
-            scenario_slug = base_name if not severity_grid else f"{base_name}_{_severity_slug(severity)}"
-            instances.append(
-                {
-                    "base_scenario": base_name,
-                    "scenario_slug": scenario_slug,
-                    "camera_degradation": preset["camera_degradation"],
-                    "imu_degradation": preset.get("imu_degradation"),
-                    "severity": float(severity),
-                    "description": f"{preset['description']} (severity={float(severity):.2f})",
-                }
-            )
+            for degradation_seed in degradation_seeds:
+                scenario_slug = base_name if not severity_grid else f"{base_name}_{_severity_slug(severity)}"
+                if multiple_seeds:
+                    scenario_slug = f"{scenario_slug}_{_seed_slug(degradation_seed)}"
+                instances.append(
+                    {
+                        "base_scenario": base_name,
+                        "scenario_slug": scenario_slug,
+                        "camera_degradation": preset["camera_degradation"],
+                        "imu_degradation": preset.get("imu_degradation"),
+                        "severity": float(severity),
+                        "degradation_seed": int(degradation_seed),
+                        "description": (
+                            f"{preset['description']} (severity={float(severity):.2f}, seed={int(degradation_seed)})"
+                        ),
+                    }
+                )
     return instances
 
 
@@ -237,7 +249,7 @@ def _run_scenario(
             "--degradation_severity",
             str(scenario["severity"]),
             "--degradation_seed",
-            "42",
+            str(scenario["degradation_seed"]),
         ]
         imu_degradation = scenario.get("imu_degradation")
         if imu_degradation:
@@ -308,6 +320,7 @@ def _run_scenario(
         "camera_degradation": scenario["camera_degradation"],
         "imu_degradation": scenario.get("imu_degradation") or "none",
         "severity": scenario["severity"],
+        "degradation_seed": int(scenario["degradation_seed"]),
         "description": scenario["description"],
         "comparison_gui_path": str((comparison_dir / "gui" / "visual_demo.html").resolve()),
         "comparison_summary_path": str((comparison_dir / "gui" / "comparison_gui_summary.txt").resolve()),
@@ -356,6 +369,12 @@ def main():
         default="",
         help="Optional comma-separated severity override grid, e.g. 0.45,0.65",
     )
+    parser.add_argument(
+        "--degradation-seeds",
+        type=str,
+        default="42",
+        help="Comma-separated degradation seeds, e.g. 42,123,999",
+    )
     parser.add_argument("--output-root", type=str, default=str(ROOT_DIR / "outputs" / "multisequence_degradation_sweep"))
     parser.add_argument("--vio-python", type=str, default=str(VIO_ROOT / ".venv" / "bin" / "python"))
     parser.add_argument("--self-aware-python", type=str, default=str(SELF_AWARE_ROOT / "venv" / "bin" / "python"))
@@ -376,6 +395,7 @@ def main():
     sequences = [item.strip() for item in args.sequences.split(",") if item.strip()]
     scenario_names = [item.strip() for item in args.scenarios.split(",") if item.strip()]
     severity_grid = [float(item.strip()) for item in args.severity_grid.split(",") if item.strip()]
+    degradation_seeds = [int(item.strip()) for item in args.degradation_seeds.split(",") if item.strip()]
 
     unknown = [name for name in scenario_names if name not in SCENARIO_PRESETS]
     if unknown:
@@ -384,8 +404,10 @@ def main():
         for value in severity_grid:
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"Severity must be in [0, 1], got {value}")
+    if not degradation_seeds:
+        raise ValueError("At least one degradation seed must be provided.")
 
-    scenario_instances = _build_scenario_instances(scenario_names, severity_grid)
+    scenario_instances = _build_scenario_instances(scenario_names, severity_grid, degradation_seeds)
 
     rows: list[Dict[str, object]] = []
     for sequence in sequences:

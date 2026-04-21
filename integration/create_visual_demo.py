@@ -14,6 +14,38 @@ import numpy as np
 import pandas as pd
 
 
+def _apply_primary_display_columns(demo: pd.DataFrame) -> pd.DataFrame:
+    demo = demo.copy()
+    if 'primary_risk_score' not in demo.columns:
+        demo['risk_score_source'] = 'learned_failure_probability'
+        return demo
+
+    demo['learned_failure_probability'] = demo.get('learned_failure_probability', demo.get('failure_probability'))
+    demo['learned_confidence_score'] = demo.get('learned_confidence_score', demo.get('confidence_score'))
+    demo['learned_predicted_failure'] = demo.get('learned_predicted_failure', demo.get('predicted_failure'))
+    if 'predicted_localization_reliability' in demo.columns:
+        demo['learned_predicted_localization_reliability'] = demo.get(
+            'learned_predicted_localization_reliability',
+            demo.get('predicted_localization_reliability'),
+        )
+
+    demo['failure_probability'] = demo['primary_risk_score']
+    if 'primary_confidence_score' in demo.columns:
+        demo['confidence_score'] = demo['primary_confidence_score']
+    if 'primary_predicted_failure' in demo.columns:
+        demo['predicted_failure'] = demo['primary_predicted_failure']
+    if 'primary_localization_reliability' in demo.columns:
+        demo['predicted_localization_reliability'] = demo['primary_localization_reliability']
+
+    source = (
+        str(demo['primary_risk_source'].dropna().iloc[0])
+        if 'primary_risk_source' in demo.columns and demo['primary_risk_source'].notna().any()
+        else 'primary_risk_score'
+    )
+    demo['risk_score_source'] = source
+    return demo
+
+
 def _load_estimated(estimated_path: str) -> pd.DataFrame:
     df = pd.read_csv(
         estimated_path,
@@ -54,7 +86,7 @@ def build_demo_dataframe(metrics_path: str,
         direction='nearest',
         tolerance=0.02,
     )
-    return demo
+    return _apply_primary_display_columns(demo)
 
 
 def _write_summary(demo: pd.DataFrame, output_dir: str):
@@ -62,8 +94,14 @@ def _write_summary(demo: pd.DataFrame, output_dir: str):
     with open(summary_path, 'w', encoding='utf-8') as handle:
         handle.write('Unified visual demo summary\n')
         handle.write(f'rows: {len(demo)}\n')
+        if 'risk_score_source' in demo.columns:
+            handle.write(f'risk_score_source: {demo["risk_score_source"].iloc[0]}\n')
         handle.write(f'failure_probability_mean: {demo["failure_probability"].mean():.6f}\n')
         handle.write(f'confidence_mean: {demo["confidence_score"].mean():.6f}\n')
+        if 'learned_failure_probability' in demo.columns:
+            handle.write(f'learned_failure_probability_mean: {demo["learned_failure_probability"].mean():.6f}\n')
+        if 'learned_confidence_score' in demo.columns:
+            handle.write(f'learned_confidence_mean: {demo["learned_confidence_score"].mean():.6f}\n')
         if 'actual_pose_error' in demo.columns:
             handle.write(f'actual_pose_error_mean: {demo["actual_pose_error"].mean():.6f}\n')
         handle.write(f'max_failure_probability: {demo["failure_probability"].max():.6f}\n')
@@ -160,7 +198,10 @@ def _save_top_risky_frames(demo: pd.DataFrame, output_dir: str) -> str:
         'frame_id',
         'failure_probability',
         'confidence_score',
+        'risk_score_source',
         'predicted_pose_error',
+        'learned_failure_probability',
+        'learned_confidence_score',
         'actual_pose_error',
         'inlier_ratio',
         'num_matches',
@@ -180,9 +221,15 @@ def _write_dashboard_json(demo: pd.DataFrame, output_dir: str) -> str:
         'frame_id',
         'failure_probability',
         'confidence_score',
+        'risk_score_source',
         'predicted_pose_error',
         'predicted_localization_reliability',
         'predicted_failure',
+        'learned_failure_probability',
+        'learned_confidence_score',
+        'learned_predicted_pose_error',
+        'learned_predicted_localization_reliability',
+        'learned_predicted_failure',
         'actual_pose_error',
         'actual_rotation_error_deg',
         'px',
@@ -207,8 +254,10 @@ def _write_dashboard_json(demo: pd.DataFrame, output_dir: str) -> str:
                 'rows': dashboard_rows.to_dict(orient='records'),
                 'summary': {
                     'num_rows': int(len(demo)),
+                    'risk_score_source': demo['risk_score_source'].iloc[0] if 'risk_score_source' in demo.columns else 'learned_failure_probability',
                     'failure_probability_mean': float(demo['failure_probability'].mean()),
                     'confidence_mean': float(demo['confidence_score'].mean()),
+                    'learned_failure_probability_mean': float(demo['learned_failure_probability'].mean()) if 'learned_failure_probability' in demo.columns else None,
                     'actual_pose_error_mean': float(demo['actual_pose_error'].mean()) if 'actual_pose_error' in demo.columns else None,
                     'max_failure_probability': float(demo['failure_probability'].max()),
                 },
@@ -225,6 +274,7 @@ def _write_html_report(demo: pd.DataFrame, output_dir: str):
     top_risky_rows = top_risky.replace({np.nan: None}).to_dict(orient='records')
     has_actual_pose_error = 'actual_pose_error' in demo.columns and demo['actual_pose_error'].notna().any()
     actual_pose_error_display = f"{demo['actual_pose_error'].mean():.3f}" if has_actual_pose_error else "N/A"
+    risk_source_display = demo['risk_score_source'].iloc[0] if 'risk_score_source' in demo.columns else 'learned_failure_probability'
     third_series_label = 'actual_pose_error' if has_actual_pose_error else 'predicted_pose_error'
     third_series_description = (
         "这里同步展示 `failure_probability`、`confidence_score` 和 `actual_pose_error`，便于看“模型判断”和“真实误差”是否同涨同跌。"
@@ -434,6 +484,7 @@ def _write_html_report(demo: pd.DataFrame, output_dir: str):
         <div class="card"><strong>预测帧数</strong><span class="value">{len(demo)}</span></div>
         <div class="card"><strong>平均失效概率</strong><span class="value">{demo['failure_probability'].mean():.3f}</span></div>
         <div class="card"><strong>平均置信度</strong><span class="value">{demo['confidence_score'].mean():.3f}</span></div>
+        <div class="card"><strong>主风险来源</strong><span class="value">{risk_source_display}</span></div>
         <div class="card"><strong>平均真实误差</strong><span class="value">{actual_pose_error_display}</span></div>
       </div>
     </section>

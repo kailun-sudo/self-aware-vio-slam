@@ -17,11 +17,17 @@ Supported data sources:
    Uses long packaged baseline sequences plus degraded replay runs. This is the
    preferred mode when both sources are available.
 
-The learning task is unified:
+The learning task supports multiple future-oriented targets:
 
-- regression target: future max pose error over next H frames
-- classification target: future max pose error above threshold OR future tracking lost
-- trend-aware learning features are used for training
+- future_window_max:
+  regression = future max pose error over next H frames
+- future_window_max_percentile:
+  same regression target, but classification threshold is taken from the
+  train-split percentile
+- future_error_growth:
+  regression = positive future error growth over next H frames
+
+Trend-aware learning features are used for training.
 
 Runtime inference remains on the legacy 7-D feature set.
 """
@@ -49,15 +55,32 @@ from src.data.feature_engineering import (
     extract_learning_features,
     normalize_features,
 )
-from src.data.temporal_window import create_temporal_windows_with_labels
+from src.data.temporal_window import create_temporal_windows
 from src.data.failure_labels import (
     create_future_error_targets,
-    create_future_failure_labels,
+    create_future_error_growth_targets,
+    create_future_tracking_failure_targets,
 )
 from src.utils.config_loader import load_config
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+SUPPORTED_TARGET_MODES = {
+    'future_window_max',
+    'future_window_max_percentile',
+    'future_error_growth',
+}
+
+RUNTIME_ALIGNED_COLUMNS = {
+    'frame_id',
+    'num_matches',
+    'num_inliers',
+    'inlier_ratio',
+    'mean_epipolar_error',
+    'pose_optimization_residual',
+    'imu_delta_translation',
+    'trajectory_increment_norm',
+}
 
 
 def load_sequence_data(seq_dir: str | Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -101,6 +124,25 @@ def _canonical_sequence_group(name: str) -> str:
     return name
 
 
+def _infer_feature_semantics(metrics: pd.DataFrame) -> str:
+    columns = set(metrics.columns)
+    runtime_overlap = len(RUNTIME_ALIGNED_COLUMNS & columns)
+    if runtime_overlap >= 4:
+        return 'runtime_aligned'
+    return 'legacy_packaged'
+
+
+def _resolve_sequence_dir(data_dir: Path, sequence_name: str) -> Path | None:
+    candidates = [
+        data_dir / f"{sequence_name}_unified",
+        data_dir / sequence_name,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _resolve_path(path_value: str | None) -> Path | None:
     if not path_value:
         return None
@@ -110,34 +152,70 @@ def _resolve_path(path_value: str | None) -> Path | None:
     return path
 
 
+def _resolve_paths(path_value: str | None) -> List[Path]:
+    if not path_value:
+        return []
+    paths: List[Path] = []
+    for raw_item in str(path_value).split(','):
+        item = raw_item.strip()
+        if not item:
+            continue
+        resolved = _resolve_path(item)
+        if resolved is not None:
+            paths.append(resolved)
+    return paths
+
+
+def _normalize_percentile(percentile: float) -> float:
+    if percentile <= 0:
+        raise ValueError("classification_percentile must be > 0")
+    if percentile <= 1.0:
+        percentile *= 100.0
+    if percentile >= 100:
+        raise ValueError("classification_percentile must be < 100")
+    return float(percentile)
+
+
 def _prepare_targets(
     metrics: pd.DataFrame,
     errors: pd.DataFrame,
+    target_mode: str,
     prediction_horizon: int,
-    error_threshold: float,
     use_tracking_lost: bool,
     regression_aggregation: str,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    regression_targets = create_future_error_targets(
-        pose_errors=errors,
-        prediction_horizon=prediction_horizon,
-        aggregation=regression_aggregation,
-    )
-    failure_targets = create_future_failure_labels(
-        pose_errors=errors,
-        slam_metrics=metrics,
-        error_threshold=error_threshold,
-        prediction_horizon=prediction_horizon,
-        use_tracking_state=use_tracking_lost,
-        aggregation=regression_aggregation,
-    )
-    return regression_targets.astype(np.float32), failure_targets.astype(np.float32)
+    if target_mode in {'future_window_max', 'future_window_max_percentile'}:
+        regression_targets = create_future_error_targets(
+            pose_errors=errors,
+            prediction_horizon=prediction_horizon,
+            aggregation=regression_aggregation,
+        )
+    elif target_mode == 'future_error_growth':
+        regression_targets = create_future_error_growth_targets(
+            pose_errors=errors,
+            prediction_horizon=prediction_horizon,
+            aggregation=regression_aggregation,
+            positive_only=True,
+        )
+    else:
+        raise ValueError(f"Unsupported target mode: {target_mode}")
+
+    if use_tracking_lost:
+        tracking_targets = create_future_tracking_failure_targets(
+            slam_metrics=metrics,
+            prediction_horizon=prediction_horizon,
+        )
+    else:
+        tracking_targets = np.zeros(len(metrics), dtype=np.float32)
+        tracking_targets[-prediction_horizon:] = np.nan
+
+    return regression_targets.astype(np.float32), tracking_targets.astype(np.float32)
 
 
 def _trim_for_future_targets(
     features: np.ndarray,
     regression_targets: np.ndarray,
-    failure_targets: np.ndarray,
+    tracking_targets: np.ndarray,
     prediction_horizon: int,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     valid_length = len(features) - prediction_horizon
@@ -147,26 +225,28 @@ def _trim_for_future_targets(
         )
     features = features[:valid_length]
     regression_targets = regression_targets[:valid_length]
-    failure_targets = failure_targets[:valid_length]
+    tracking_targets = tracking_targets[:valid_length]
 
-    valid_mask = (~np.isnan(regression_targets)) & (~np.isnan(failure_targets))
-    return features[valid_mask], regression_targets[valid_mask], failure_targets[valid_mask]
+    valid_mask = (~np.isnan(regression_targets)) & (~np.isnan(tracking_targets))
+    return features[valid_mask], regression_targets[valid_mask], tracking_targets[valid_mask]
 
 
 def _load_sequence_records(data_dir: Path, sequences: List[str]) -> List[Dict[str, object]]:
     records: List[Dict[str, object]] = []
     for seq in sequences:
-        seq_dir = data_dir / seq
-        if not seq_dir.exists():
+        seq_dir = _resolve_sequence_dir(data_dir, seq)
+        if seq_dir is None:
             print(f"  Warning: {seq_dir} not found, skipping")
             continue
         metrics, errors = load_sequence_data(seq_dir)
+        feature_semantics = _infer_feature_semantics(metrics)
         records.append(
             {
-                'run_id': seq,
+                'run_id': seq_dir.name,
                 'sequence': seq,
                 'sequence_group': _canonical_sequence_group(seq),
                 'run_kind': 'sequence_dir',
+                'feature_semantics': feature_semantics,
                 'base_scenario': 'baseline',
                 'scenario': 'baseline',
                 'severity': 0.0,
@@ -175,7 +255,7 @@ def _load_sequence_records(data_dir: Path, sequences: List[str]) -> List[Dict[st
                 'path': str(seq_dir),
             }
         )
-        print(f"  Loaded sequence dir {seq}: {len(metrics)} frames")
+        print(f"  Loaded sequence dir {seq_dir.name}: {len(metrics)} frames ({feature_semantics})")
     return records
 
 
@@ -189,54 +269,74 @@ def _infer_degraded_dir(comparison_gui_path: Path) -> Path:
     return scenario_root / "degraded_self_aware"
 
 
-def _load_run_records_from_sweep(sweep_results_path: Path, include_baseline: bool = True) -> List[Dict[str, object]]:
-    results = pd.read_csv(sweep_results_path)
+def _load_run_records_from_sweep(
+    sweep_results_paths: List[Path],
+    include_baseline: bool = True,
+) -> List[Dict[str, object]]:
     records: List[Dict[str, object]] = []
     seen_baselines: set[str] = set()
+    seen_degraded_paths: set[str] = set()
 
-    for row in results.to_dict(orient='records'):
-        sequence = row['sequence']
-        comparison_gui_path = Path(row['comparison_gui_path'])
-        baseline_dir = _infer_baseline_dir(comparison_gui_path)
-        degraded_dir = _infer_degraded_dir(comparison_gui_path)
+    for sweep_results_path in sweep_results_paths:
+        results = pd.read_csv(sweep_results_path)
+        source_tag = sweep_results_path.parent.name
 
-        if include_baseline and sequence not in seen_baselines:
-            if (baseline_dir / 'slam_metrics.csv').exists() and (baseline_dir / 'pose_errors.csv').exists():
-                metrics, errors = load_sequence_data(baseline_dir)
+        for row in results.to_dict(orient='records'):
+            sequence = row['sequence']
+            comparison_gui_path = Path(row['comparison_gui_path'])
+            baseline_dir = _infer_baseline_dir(comparison_gui_path)
+            degraded_dir = _infer_degraded_dir(comparison_gui_path)
+
+            if include_baseline and sequence not in seen_baselines:
+                if (baseline_dir / 'slam_metrics.csv').exists() and (baseline_dir / 'pose_errors.csv').exists():
+                    metrics, errors = load_sequence_data(baseline_dir)
+                    records.append(
+                        {
+                            'run_id': f"{sequence}::baseline::{source_tag}",
+                            'sequence': sequence,
+                            'sequence_group': row.get('sequence_short', _canonical_sequence_group(sequence)),
+                            'run_kind': 'baseline',
+                            'feature_semantics': 'runtime_aligned',
+                            'family_id': f"{sequence}::baseline",
+                            'base_scenario': 'baseline',
+                            'scenario': 'baseline',
+                            'severity': 0.0,
+                            'source_tag': source_tag,
+                            'metrics': metrics,
+                            'errors': errors,
+                            'path': str(baseline_dir),
+                        }
+                    )
+                    seen_baselines.add(sequence)
+
+            degraded_path_key = str(degraded_dir.resolve())
+            if degraded_path_key in seen_degraded_paths:
+                continue
+            if (degraded_dir / 'slam_metrics.csv').exists() and (degraded_dir / 'pose_errors.csv').exists():
+                metrics, errors = load_sequence_data(degraded_dir)
+                degraded_seed = row.get('degradation_seed')
+                run_id = f"{sequence}::{row['scenario']}::{source_tag}"
+                if degraded_seed is not None and f"seed{int(degraded_seed)}" not in str(row['scenario']):
+                    run_id = f"{run_id}::seed{int(degraded_seed)}"
                 records.append(
                     {
-                        'run_id': f"{sequence}::baseline",
+                        'run_id': run_id,
                         'sequence': sequence,
                         'sequence_group': row.get('sequence_short', _canonical_sequence_group(sequence)),
-                        'run_kind': 'baseline',
-                        'family_id': f"{sequence}::baseline",
-                        'base_scenario': 'baseline',
-                        'scenario': 'baseline',
-                        'severity': 0.0,
+                        'run_kind': 'degraded',
+                        'feature_semantics': 'runtime_aligned',
+                        'family_id': f"{sequence}::{row.get('replay_family', row.get('base_scenario', row['scenario']))}",
+                        'base_scenario': row.get('base_scenario', row['scenario']),
+                        'scenario': row['scenario'],
+                        'severity': float(row.get('severity', 0.0)),
+                        'degradation_seed': int(degraded_seed) if degraded_seed is not None else None,
+                        'source_tag': source_tag,
                         'metrics': metrics,
                         'errors': errors,
-                        'path': str(baseline_dir),
+                        'path': str(degraded_dir),
                     }
                 )
-                seen_baselines.add(sequence)
-
-        if (degraded_dir / 'slam_metrics.csv').exists() and (degraded_dir / 'pose_errors.csv').exists():
-            metrics, errors = load_sequence_data(degraded_dir)
-            records.append(
-                {
-                    'run_id': f"{sequence}::{row['scenario']}",
-                    'sequence': sequence,
-                    'sequence_group': row.get('sequence_short', _canonical_sequence_group(sequence)),
-                    'run_kind': 'degraded',
-                    'family_id': f"{sequence}::{row.get('replay_family', row.get('base_scenario', row['scenario']))}",
-                    'base_scenario': row.get('base_scenario', row['scenario']),
-                    'scenario': row['scenario'],
-                    'severity': float(row.get('severity', 0.0)),
-                    'metrics': metrics,
-                    'errors': errors,
-                    'path': str(degraded_dir),
-                }
-            )
+                seen_degraded_paths.add(degraded_path_key)
 
     return records
 
@@ -342,34 +442,60 @@ def _resolve_data_source(config: dict) -> Tuple[str, List[Dict[str, object]], Di
     dataset_cfg = config['dataset']
     source_mode = dataset_cfg.get('source_mode', 'auto')
     include_baseline = dataset_cfg.get('include_baseline_runs', True)
+    feature_semantics_policy = dataset_cfg.get('feature_semantics_policy', 'runtime_aligned')
 
-    sweep_results_path = _resolve_path(config['paths'].get('degradation_sweep_results'))
+    sweep_results_paths = [path for path in _resolve_paths(config['paths'].get('degradation_sweep_results')) if path.exists()]
     data_dir = _resolve_path(config['paths']['slam_metrics_dir'])
     sequences = config['dataset']['euroc_sequences']
     sequence_records = _load_sequence_records(data_dir, sequences) if data_dir and data_dir.exists() else []
 
     sweep_records: List[Dict[str, object]] = []
-    if sweep_results_path and sweep_results_path.exists():
-        sweep_records = _load_run_records_from_sweep(sweep_results_path, include_baseline=include_baseline)
+    if sweep_results_paths:
+        sweep_records = _load_run_records_from_sweep(sweep_results_paths, include_baseline=include_baseline)
+
+    all_sequence_records = list(sequence_records)
+    all_sweep_records = list(sweep_records)
+
+    if feature_semantics_policy == 'runtime_aligned':
+        sequence_records = [record for record in sequence_records if record.get('feature_semantics') == 'runtime_aligned']
+        sweep_records = [record for record in sweep_records if record.get('feature_semantics') == 'runtime_aligned']
+    elif feature_semantics_policy != 'allow_mixed':
+        raise ValueError(
+            f"Unsupported dataset.feature_semantics_policy={feature_semantics_policy}. "
+            "Supported: runtime_aligned, allow_mixed"
+        )
 
     source_info: Dict[str, object] = {
         'requested_source_mode': source_mode,
         'selected_source_mode': None,
         'fallback_activated': False,
+        'feature_semantics_policy': feature_semantics_policy,
+        'sequence_record_count_total': len(all_sequence_records),
         'sequence_record_count': len(sequence_records),
+        'sweep_record_count_total': len(all_sweep_records),
         'sweep_record_count': len(sweep_records),
         'sweep_degraded_run_count': sum(1 for record in sweep_records if record['run_kind'] == 'degraded'),
         'sweep_baseline_run_count': sum(1 for record in sweep_records if record['run_kind'] == 'baseline'),
+        'legacy_sequence_records_filtered': sum(
+            1 for record in all_sequence_records if record.get('feature_semantics') != 'runtime_aligned'
+        ),
         'sequence_dir_path': str(data_dir) if data_dir else None,
-        'sweep_results_path': str(sweep_results_path) if sweep_results_path else None,
+        'sweep_results_paths': [str(path) for path in sweep_results_paths],
+        'sweep_results_path': ','.join(str(path) for path in sweep_results_paths) if sweep_results_paths else None,
     }
 
     if source_mode == 'sweep_runs':
         if not sweep_records:
-            raise FileNotFoundError(f"Sweep results not found or no usable run directories were discovered: {sweep_results_path}")
+            raise FileNotFoundError(
+                "Sweep results not found or no usable run directories were discovered: "
+                f"{source_info['sweep_results_paths']}"
+            )
         source_info['selected_source_mode'] = 'sweep_runs'
         print(f"Data source selected: sweep_runs")
+        print(f"  feature semantics policy: {feature_semantics_policy}")
+        print(f"  sequence dirs found: {source_info['sequence_record_count']} usable / {source_info['sequence_record_count_total']} total")
         print(f"  replay runs found: {source_info['sweep_degraded_run_count']} degraded + {source_info['sweep_baseline_run_count']} baseline")
+        print(f"  legacy sequence dirs filtered: {source_info['legacy_sequence_records_filtered']}")
         print(f"  fallback activated: False")
         return 'sweep_runs', sweep_records, source_info
 
@@ -378,19 +504,35 @@ def _resolve_data_source(config: dict) -> Tuple[str, List[Dict[str, object]], Di
             raise FileNotFoundError(f"No sequence data found in {data_dir}")
         source_info['selected_source_mode'] = 'sequence_dirs'
         print(f"Data source selected: sequence_dirs")
-        print(f"  sequence dirs found: {source_info['sequence_record_count']}")
+        print(f"  feature semantics policy: {feature_semantics_policy}")
+        print(f"  sequence dirs found: {source_info['sequence_record_count']} usable / {source_info['sequence_record_count_total']} total")
         print(f"  replay runs found: {source_info['sweep_degraded_run_count']} degraded + {source_info['sweep_baseline_run_count']} baseline")
+        print(f"  legacy sequence dirs filtered: {source_info['legacy_sequence_records_filtered']}")
         print(f"  fallback activated: False")
         return 'sequence_dirs', sequence_records, source_info
 
     if source_mode == 'hybrid' or (source_mode == 'auto' and sequence_records and sweep_records):
-        hybrid_records = sequence_records + [record for record in sweep_records if record['run_kind'] == 'degraded']
+        hybrid_records = list(sequence_records)
+        hybrid_records.extend(record for record in sweep_records if record['run_kind'] == 'degraded')
+
+        sequence_groups_present = {
+            record.get('sequence_group', _canonical_sequence_group(record['sequence']))
+            for record in sequence_records
+        }
+        hybrid_records.extend(
+            record
+            for record in sweep_records
+            if record['run_kind'] == 'baseline'
+            and record.get('sequence_group', _canonical_sequence_group(record['sequence'])) not in sequence_groups_present
+        )
         if not hybrid_records:
             raise FileNotFoundError("Hybrid source requested, but no usable baseline/degraded records were found.")
         source_info['selected_source_mode'] = 'hybrid'
         print(f"Data source selected: hybrid")
-        print(f"  sequence dirs found: {source_info['sequence_record_count']}")
+        print(f"  feature semantics policy: {feature_semantics_policy}")
+        print(f"  sequence dirs found: {source_info['sequence_record_count']} usable / {source_info['sequence_record_count_total']} total")
         print(f"  replay runs found: {source_info['sweep_degraded_run_count']} degraded + {source_info['sweep_baseline_run_count']} baseline")
+        print(f"  legacy sequence dirs filtered: {source_info['legacy_sequence_records_filtered']}")
         print(f"  fallback activated: False")
         return 'hybrid', hybrid_records, source_info
 
@@ -398,8 +540,10 @@ def _resolve_data_source(config: dict) -> Tuple[str, List[Dict[str, object]], Di
         source_info['selected_source_mode'] = 'sweep_runs'
         source_info['fallback_activated'] = source_mode == 'auto'
         print(f"Data source selected: sweep_runs")
-        print(f"  sequence dirs found: {source_info['sequence_record_count']}")
+        print(f"  feature semantics policy: {feature_semantics_policy}")
+        print(f"  sequence dirs found: {source_info['sequence_record_count']} usable / {source_info['sequence_record_count_total']} total")
         print(f"  replay runs found: {source_info['sweep_degraded_run_count']} degraded + {source_info['sweep_baseline_run_count']} baseline")
+        print(f"  legacy sequence dirs filtered: {source_info['legacy_sequence_records_filtered']}")
         print(f"  fallback activated: {source_info['fallback_activated']}")
         return 'sweep_runs', sweep_records, source_info
 
@@ -407,8 +551,10 @@ def _resolve_data_source(config: dict) -> Tuple[str, List[Dict[str, object]], Di
         source_info['selected_source_mode'] = 'sequence_dirs'
         source_info['fallback_activated'] = source_mode == 'auto'
         print(f"Data source selected: sequence_dirs")
-        print(f"  sequence dirs found: {source_info['sequence_record_count']}")
+        print(f"  feature semantics policy: {feature_semantics_policy}")
+        print(f"  sequence dirs found: {source_info['sequence_record_count']} usable / {source_info['sequence_record_count_total']} total")
         print(f"  replay runs found: {source_info['sweep_degraded_run_count']} degraded + {source_info['sweep_baseline_run_count']} baseline")
+        print(f"  legacy sequence dirs filtered: {source_info['legacy_sequence_records_filtered']}")
         print(f"  fallback activated: {source_info['fallback_activated']}")
         return 'sequence_dirs', sequence_records, source_info
 
@@ -460,8 +606,8 @@ def _build_splits(records: List[Dict[str, object]], source_mode: str, config: di
     elif source_mode == 'sweep_runs':
         splits = _split_run_records(records, config)
     elif source_mode == 'hybrid':
-        baseline_records = [record for record in records if record['run_kind'] == 'sequence_dir']
-        degraded_records = [record for record in records if record['run_kind'] != 'sequence_dir']
+        baseline_records = [record for record in records if record['run_kind'] in {'sequence_dir', 'baseline'}]
+        degraded_records = [record for record in records if record['run_kind'] == 'degraded']
         baseline_records = sorted(baseline_records, key=lambda record: record['sequence_group'])
         baseline_splits = _split_sequence_groups(baseline_records, config)
         degraded_splits = _split_run_records(degraded_records, config)
@@ -504,6 +650,7 @@ def _write_dataset_diagnostics(dataset: Dict, output_path: str | Path):
 
     histogram_rows = []
     fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
+    x_label = dataset.get('target_definition', {}).get('regression_target', 'target')
     for ax, split_name in zip(axes, ['train', 'val', 'test']):
         y_error = dataset[split_name]['y_error']
         counts, bin_edges = np.histogram(y_error, bins=20)
@@ -518,7 +665,7 @@ def _write_dataset_diagnostics(dataset: Dict, output_path: str | Path):
             )
         ax.hist(y_error, bins=20, color='#4C78A8', alpha=0.85, edgecolor='white')
         ax.set_title(f"{split_name} y_error")
-        ax.set_xlabel('future_max_pose_error')
+        ax.set_xlabel(x_label)
         if split_name == 'train':
             ax.set_ylabel('count')
     fig.tight_layout()
@@ -531,6 +678,7 @@ def _write_dataset_diagnostics(dataset: Dict, output_path: str | Path):
         f"source_mode: {dataset.get('source_mode')}",
         f"split_protocol: {dataset.get('split_protocol')}",
         f"source_info: {dataset.get('source_info')}",
+        f"target_definition: {dataset.get('target_definition')}",
     ]
     for split_name in ['train', 'val', 'test']:
         y_error = dataset[split_name]['y_error']
@@ -551,7 +699,12 @@ def build_dataset(config: dict | None = None) -> Dict:
     rolling_window = config['features'].get('rolling_window', 5)
     learning_feature_names = config['features'].get('learning_names', LEARNING_FEATURE_COLUMNS)
     prediction_horizon = config['targets']['prediction_horizon']
-    error_threshold = config['targets']['classification_error_threshold']
+    target_mode = config['targets']['mode']
+    if target_mode not in SUPPORTED_TARGET_MODES:
+        raise ValueError(f"Unsupported targets.mode={target_mode}. Supported: {sorted(SUPPORTED_TARGET_MODES)}")
+    error_threshold = config['targets'].get('classification_error_threshold', 0.18)
+    classification_percentile = _normalize_percentile(config['targets'].get('classification_percentile', 0.9))
+    growth_threshold = float(config['targets'].get('classification_growth_threshold', 0.5))
     use_tracking_lost = config['targets'].get('use_tracking_lost', True)
     regression_aggregation = config['targets'].get('regression_aggregation', 'max')
 
@@ -569,44 +722,13 @@ def build_dataset(config: dict | None = None) -> Dict:
     all_train_features = np.concatenate(train_features_list)
     norm_stats = compute_normalization_stats(all_train_features)
 
-    dataset = {
-        'norm_stats': norm_stats,
-        'feature_names': learning_feature_names,
-        'window_size': window_size,
-        'source_mode': source_mode,
-        'split_protocol': config['dataset'].get('split_protocol', 'family_aware_dev'),
-        'source_info': source_info,
-        'target_definition': {
-            'mode': config['targets']['mode'],
-            'prediction_horizon': prediction_horizon,
-            'regression_target': config['targets']['regression_target'],
-            'regression_aggregation': regression_aggregation,
-            'classification_error_threshold': error_threshold,
-            'use_tracking_lost': use_tracking_lost,
-        },
-        'split_runs': {
-            split_name: [
-                {
-                    'run_id': record['run_id'],
-                    'sequence': record['sequence'],
-                    'sequence_group': record.get('sequence_group', _canonical_sequence_group(record['sequence'])),
-                    'run_kind': record['run_kind'],
-                    'family_id': record.get('family_id', record['run_id']),
-                    'scenario': record['scenario'],
-                    'base_scenario': record['base_scenario'],
-                    'severity': record['severity'],
-                    'path': record['path'],
-                }
-                for record in split_records
-            ]
-            for split_name, split_records in splits.items()
-        },
-        'split_diagnostics': {},
-    }
+    prepared_splits: Dict[str, List[Dict[str, object]]] = {'train': [], 'val': [], 'test': []}
+    train_window_targets = []
+    split_diagnostics = {}
 
     for split_name, split_records in splits.items():
-        X_list, y_error_list, y_failure_list = [], [], []
-        split_diagnostics = []
+        prepared_records = []
+        current_split_diagnostics = []
 
         for record in split_records:
             metrics, errors = _align_metrics_and_errors(record['metrics'], record['errors'])
@@ -617,24 +739,24 @@ def build_dataset(config: dict | None = None) -> Dict:
                 rolling_window=rolling_window,
             )
             features_norm = normalize_features(features, norm_stats)
-            regression_targets, failure_targets = _prepare_targets(
+            regression_targets, tracking_targets = _prepare_targets(
                 metrics=metrics,
                 errors=errors,
+                target_mode=target_mode,
                 prediction_horizon=prediction_horizon,
-                error_threshold=error_threshold,
                 use_tracking_lost=use_tracking_lost,
                 regression_aggregation=regression_aggregation,
             )
 
-            features_for_windows, regression_targets, failure_targets = _trim_for_future_targets(
+            features_for_windows, regression_targets, tracking_targets = _trim_for_future_targets(
                 features_norm,
                 regression_targets,
-                failure_targets,
+                tracking_targets,
                 prediction_horizon,
             )
 
             if len(features_for_windows) < window_size:
-                split_diagnostics.append(
+                current_split_diagnostics.append(
                     {
                         'run_id': record['run_id'],
                         'sequence': record['sequence'],
@@ -655,17 +777,30 @@ def build_dataset(config: dict | None = None) -> Dict:
                 )
                 continue
 
-            X, y_err, y_fail = create_temporal_windows_with_labels(
+            X, y_err = create_temporal_windows(
                 features_for_windows,
                 regression_targets,
-                failure_targets,
                 window_size=window_size,
             )
+            y_tracking = tracking_targets[window_size - 1:].astype(np.float32)
 
-            X_list.append(X)
-            y_error_list.append(y_err)
-            y_failure_list.append(y_fail)
-            split_diagnostics.append(
+            prepared_records.append(
+                {
+                    'run_id': record['run_id'],
+                    'sequence': record['sequence'],
+                    'sequence_group': record.get('sequence_group', _canonical_sequence_group(record['sequence'])),
+                    'run_kind': record['run_kind'],
+                    'scenario': record['scenario'],
+                    'base_scenario': record['base_scenario'],
+                    'severity': record['severity'],
+                    'X': X,
+                    'y_error': y_err.astype(np.float32),
+                    'y_tracking': y_tracking,
+                    'sample_count': int(len(X)),
+                    'trimmed_length': int(len(features_for_windows)),
+                }
+            )
+            current_split_diagnostics.append(
                 {
                     'run_id': record['run_id'],
                     'sequence': record['sequence'],
@@ -681,19 +816,90 @@ def build_dataset(config: dict | None = None) -> Dict:
                 }
             )
 
-        if not X_list:
+        if not prepared_records:
             raise ValueError(
                 f"No usable samples produced for split '{split_name}'. "
                 f"Check prediction_horizon={prediction_horizon}, window_size={window_size}, "
                 "and run lengths."
             )
 
+        prepared_splits[split_name] = prepared_records
+        split_diagnostics[split_name] = current_split_diagnostics
+        train_window_targets.extend(
+            record['y_error'] for record in prepared_records if split_name == 'train'
+        )
+
+    if not train_window_targets:
+        raise ValueError("No train-window targets available to resolve classification labels.")
+
+    if target_mode == 'future_window_max_percentile':
+        resolved_classification_threshold = float(
+            np.percentile(np.concatenate(train_window_targets), classification_percentile)
+        )
+    elif target_mode == 'future_error_growth':
+        resolved_classification_threshold = growth_threshold
+    else:
+        resolved_classification_threshold = float(error_threshold)
+
+    regression_target_name = (
+        'future_error_growth' if target_mode == 'future_error_growth' else config['targets']['regression_target']
+    )
+
+    dataset = {
+        'norm_stats': norm_stats,
+        'feature_names': learning_feature_names,
+        'window_size': window_size,
+        'source_mode': source_mode,
+        'split_protocol': config['dataset'].get('split_protocol', 'family_aware_dev'),
+        'source_info': source_info,
+        'target_definition': {
+            'mode': target_mode,
+            'prediction_horizon': prediction_horizon,
+            'regression_target': regression_target_name,
+            'regression_aggregation': regression_aggregation,
+            'classification_error_threshold': float(error_threshold),
+            'classification_percentile': classification_percentile,
+            'classification_growth_threshold': growth_threshold,
+            'resolved_classification_threshold': resolved_classification_threshold,
+            'use_tracking_lost': use_tracking_lost,
+        },
+        'split_runs': {
+            split_name: [
+                {
+                    'run_id': record['run_id'],
+                    'sequence': record['sequence'],
+                    'sequence_group': record.get('sequence_group', _canonical_sequence_group(record['sequence'])),
+                    'run_kind': record['run_kind'],
+                    'family_id': record.get('family_id', record['run_id']),
+                    'scenario': record['scenario'],
+                    'base_scenario': record['base_scenario'],
+                    'severity': record['severity'],
+                    'feature_semantics': record.get('feature_semantics', 'unknown'),
+                    'path': record['path'],
+                }
+                for record in split_records
+            ]
+            for split_name, split_records in splits.items()
+        },
+        'split_diagnostics': split_diagnostics,
+    }
+
+    for split_name, split_records in prepared_splits.items():
+        X_list, y_error_list, y_failure_list = [], [], []
+        for record in split_records:
+            y_fail = (record['y_error'] > resolved_classification_threshold).astype(np.float32)
+            if use_tracking_lost:
+                y_fail = np.maximum(y_fail, record['y_tracking'])
+
+            X_list.append(record['X'])
+            y_error_list.append(record['y_error'])
+            y_failure_list.append(y_fail)
+
         dataset[split_name] = {
             'X': np.concatenate(X_list),
             'y_error': np.concatenate(y_error_list),
             'y_failure': np.concatenate(y_failure_list),
         }
-        dataset['split_diagnostics'][split_name] = split_diagnostics
 
         n = len(dataset[split_name]['X'])
         n_fail = dataset[split_name]['y_failure'].sum()
@@ -725,12 +931,52 @@ def main():
         default=None,
         help='Override dataset split protocol.',
     )
+    parser.add_argument(
+        '--target-mode',
+        choices=sorted(SUPPORTED_TARGET_MODES),
+        default=None,
+        help='Override targets.mode without editing config.yaml',
+    )
+    parser.add_argument(
+        '--classification-percentile',
+        type=float,
+        default=None,
+        help='Percentile used when target-mode=future_window_max_percentile. '
+             'Accepts 0-1 or 0-100.',
+    )
+    parser.add_argument(
+        '--classification-error-threshold',
+        type=float,
+        default=None,
+        help='Absolute threshold used when target-mode=future_window_max.',
+    )
+    parser.add_argument(
+        '--classification-growth-threshold',
+        type=float,
+        default=None,
+        help='Threshold used when target-mode=future_error_growth.',
+    )
+    parser.add_argument(
+        '--degradation-sweep-results',
+        default=None,
+        help='Comma-separated sweep_results.csv paths to merge for runtime-aligned degraded runs.',
+    )
     parser.add_argument('--output-path', default=None, help='Override output dataset path.')
     args = parser.parse_args()
 
     config = load_config(args.config) if args.config else load_config()
     if args.split_protocol:
         config['dataset']['split_protocol'] = args.split_protocol
+    if args.target_mode:
+        config['targets']['mode'] = args.target_mode
+    if args.classification_percentile is not None:
+        config['targets']['classification_percentile'] = args.classification_percentile
+    if args.classification_error_threshold is not None:
+        config['targets']['classification_error_threshold'] = args.classification_error_threshold
+    if args.classification_growth_threshold is not None:
+        config['targets']['classification_growth_threshold'] = args.classification_growth_threshold
+    if args.degradation_sweep_results is not None:
+        config['paths']['degradation_sweep_results'] = args.degradation_sweep_results
     print("Building reliability dataset...")
     dataset = build_dataset(config)
 

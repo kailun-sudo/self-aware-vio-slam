@@ -21,24 +21,41 @@ def _safe_corr(a: pd.Series, b: pd.Series) -> float:
     return float(frame.iloc[:, 0].corr(frame.iloc[:, 1]))
 
 
+def _display_score_columns(predictions: pd.DataFrame) -> tuple[pd.Series, pd.Series, str]:
+    if 'primary_risk_score' in predictions.columns:
+        risk = predictions['primary_risk_score']
+        confidence = predictions.get('primary_confidence_score', 1.0 - risk)
+        source = (
+            str(predictions['primary_risk_source'].dropna().iloc[0])
+            if 'primary_risk_source' in predictions.columns and predictions['primary_risk_source'].notna().any()
+            else 'primary_risk_score'
+        )
+        return risk, confidence, source
+    return predictions['failure_probability'], predictions['confidence_score'], 'learned_failure_probability'
+
+
 def analyze_results(predictions_path: str, summary_path: str, output_dir: str) -> dict:
     predictions = pd.read_csv(predictions_path)
     os.makedirs(output_dir, exist_ok=True)
+    risk_scores, confidence_scores, risk_source = _display_score_columns(predictions)
 
     has_actual = 'actual_pose_error' in predictions.columns
     correlation = _safe_corr(
-        predictions['failure_probability'],
+        risk_scores,
         predictions['actual_pose_error'],
     ) if has_actual else float("nan")
 
     metrics = {
         'num_predictions': int(len(predictions)),
-        'failure_probability_mean': float(predictions['failure_probability'].mean()),
-        'confidence_mean': float(predictions['confidence_score'].mean()),
+        'risk_score_source': risk_source,
+        'failure_probability_mean': float(risk_scores.mean()),
+        'confidence_mean': float(confidence_scores.mean()),
         'predicted_pose_error_mean': float(predictions['predicted_pose_error'].mean()),
-        'predicted_failure_rate': float(predictions['predicted_failure'].mean()),
+        'predicted_failure_rate': float((risk_scores >= 0.5).mean()),
         'failure_vs_actual_corr': correlation,
     }
+    if 'failure_probability' in predictions.columns:
+        metrics['learned_failure_probability_mean'] = float(predictions['failure_probability'].mean())
 
     if has_actual:
         metrics['actual_pose_error_mean'] = float(predictions['actual_pose_error'].mean())
@@ -53,8 +70,8 @@ def analyze_results(predictions_path: str, summary_path: str, output_dir: str) -
 
     # Plot 1: probability and confidence over time.
     fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(predictions['timestamp'], predictions['failure_probability'], label='failure_probability', color='tab:red')
-    ax.plot(predictions['timestamp'], predictions['confidence_score'], label='confidence_score', color='tab:blue')
+    ax.plot(predictions['timestamp'], risk_scores, label='failure_probability', color='tab:red')
+    ax.plot(predictions['timestamp'], confidence_scores, label='confidence_score', color='tab:blue')
     ax.set_title('Self-Awareness Scores Over Time')
     ax.set_xlabel('timestamp (s)')
     ax.set_ylabel('score')
@@ -76,7 +93,7 @@ def analyze_results(predictions_path: str, summary_path: str, output_dir: str) -
 
         axes[1].scatter(
             predictions['actual_pose_error'],
-            predictions['failure_probability'],
+            risk_scores,
             s=10,
             alpha=0.6,
             color='tab:red',

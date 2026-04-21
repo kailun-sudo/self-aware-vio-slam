@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -25,6 +25,122 @@ from src.models.failure_predictor import build_model
 from src.utils.config_loader import load_config
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+PRIMARY_HEURISTIC_PRIORITY = (
+    'heuristic_epipolar_error_risk',
+    'heuristic_num_inliers_risk',
+    'heuristic_inlier_ratio_risk',
+    'heuristic_pose_residual_risk',
+    'heuristic_imu_residual_risk',
+)
+EPIPOLAR_RISK_SCALE = 900.0
+NUM_INLIERS_RISK_CENTER = 120.0
+NUM_INLIERS_RISK_SCALE = 40.0
+POSE_RESIDUAL_RISK_SCALE = 0.005
+
+
+def _rank_normalize(series: pd.Series) -> pd.Series:
+    values = pd.to_numeric(series, errors='coerce')
+    ranks = pd.Series(np.nan, index=series.index, dtype=float)
+    mask = np.isfinite(values.to_numpy(dtype=float))
+    if not np.any(mask):
+        return ranks
+    ranked = values[mask].rank(method='average', pct=True).astype(float)
+    ranks.loc[mask] = ranked.to_numpy(dtype=float)
+    return ranks
+
+
+def _heuristic_score_definitions(metrics_df: pd.DataFrame) -> Dict[str, pd.Series]:
+    scores: Dict[str, pd.Series] = {}
+    if 'inlier_ratio' in metrics_df.columns:
+        scores['heuristic_inlier_ratio_risk'] = 1.0 - pd.to_numeric(metrics_df['inlier_ratio'], errors='coerce')
+    if 'pose_optimization_residual' in metrics_df.columns:
+        residual = pd.to_numeric(metrics_df['pose_optimization_residual'], errors='coerce')
+        scores['heuristic_pose_residual_risk'] = residual
+        scores['heuristic_imu_residual_risk'] = residual
+    if 'num_inliers' in metrics_df.columns:
+        scores['heuristic_num_inliers_risk'] = -pd.to_numeric(metrics_df['num_inliers'], errors='coerce')
+    if 'mean_epipolar_error' in metrics_df.columns:
+        scores['heuristic_epipolar_error_risk'] = pd.to_numeric(metrics_df['mean_epipolar_error'], errors='coerce')
+    return scores
+
+
+def _sigmoid(values: pd.Series | np.ndarray) -> pd.Series:
+    array = pd.to_numeric(values, errors='coerce').to_numpy(dtype=float) if isinstance(values, pd.Series) else np.asarray(values, dtype=float)
+    clipped = np.clip(array, -60.0, 60.0)
+    return pd.Series(1.0 / (1.0 + np.exp(-clipped)), index=values.index if isinstance(values, pd.Series) else None, dtype=float)
+
+
+def _calibrated_heuristic_scores(raw_scores: Dict[str, pd.Series]) -> Dict[str, pd.Series]:
+    calibrated: Dict[str, pd.Series] = {}
+
+    if 'heuristic_epipolar_error_risk' in raw_scores:
+        epipolar = pd.to_numeric(raw_scores['heuristic_epipolar_error_risk'], errors='coerce').clip(lower=0.0)
+        calibrated['heuristic_epipolar_error_risk_calibrated'] = 1.0 - np.exp(-epipolar / EPIPOLAR_RISK_SCALE)
+
+    if 'heuristic_num_inliers_risk' in raw_scores:
+        num_inliers = -pd.to_numeric(raw_scores['heuristic_num_inliers_risk'], errors='coerce')
+        logits = -(num_inliers - NUM_INLIERS_RISK_CENTER) / NUM_INLIERS_RISK_SCALE
+        calibrated['heuristic_num_inliers_risk_calibrated'] = _sigmoid(logits)
+
+    if 'heuristic_inlier_ratio_risk' in raw_scores:
+        calibrated['heuristic_inlier_ratio_risk_calibrated'] = (
+            pd.to_numeric(raw_scores['heuristic_inlier_ratio_risk'], errors='coerce').clip(lower=0.0, upper=1.0)
+        )
+
+    if 'heuristic_pose_residual_risk' in raw_scores:
+        residual = pd.to_numeric(raw_scores['heuristic_pose_residual_risk'], errors='coerce').clip(lower=0.0)
+        calibrated['heuristic_pose_residual_risk_calibrated'] = (residual / POSE_RESIDUAL_RISK_SCALE).clip(lower=0.0, upper=1.0)
+
+    if 'heuristic_imu_residual_risk' in raw_scores:
+        residual = pd.to_numeric(raw_scores['heuristic_imu_residual_risk'], errors='coerce').clip(lower=0.0)
+        calibrated['heuristic_imu_residual_risk_calibrated'] = (residual / POSE_RESIDUAL_RISK_SCALE).clip(lower=0.0, upper=1.0)
+
+    return calibrated
+
+
+def _primary_risk_columns(metrics_df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+    heuristic_scores = _heuristic_score_definitions(metrics_df)
+    columns = pd.DataFrame(index=metrics_df.index)
+    for name, values in heuristic_scores.items():
+        columns[name] = values.to_numpy(dtype=float)
+        columns[f'{name}_rank'] = _rank_normalize(values).to_numpy(dtype=float)
+    calibrated_scores = _calibrated_heuristic_scores(heuristic_scores)
+    for name, values in calibrated_scores.items():
+        columns[name] = values.to_numpy(dtype=float)
+
+    primary_source = 'learned_failure_probability'
+    if (
+        'heuristic_epipolar_error_risk_calibrated' in columns.columns
+        and 'heuristic_num_inliers_risk_calibrated' in columns.columns
+    ):
+        columns['primary_risk_score'] = 0.5 * (
+            columns['heuristic_epipolar_error_risk_calibrated'] +
+            columns['heuristic_num_inliers_risk_calibrated']
+        )
+        primary_source = 'heuristic_epipolar_num_inliers_absolute_fusion'
+    else:
+        calibrated_priority = (
+            'heuristic_epipolar_error_risk_calibrated',
+            'heuristic_num_inliers_risk_calibrated',
+            'heuristic_inlier_ratio_risk_calibrated',
+            'heuristic_pose_residual_risk_calibrated',
+            'heuristic_imu_residual_risk_calibrated',
+        )
+        for candidate in calibrated_priority:
+            if candidate in columns.columns and columns[candidate].notna().any():
+                columns['primary_risk_score'] = columns[candidate]
+                primary_source = candidate
+                break
+
+    if 'primary_risk_score' not in columns.columns:
+        columns['primary_risk_score'] = np.nan
+
+    columns['primary_confidence_score'] = 1.0 - columns['primary_risk_score']
+    columns['primary_predicted_failure'] = (
+        pd.to_numeric(columns['primary_risk_score'], errors='coerce').fillna(0.0) >= 0.5
+    ).astype(int)
+    columns['primary_risk_source'] = primary_source
+    return columns, primary_source
 
 
 def _extract_features_for_model(metrics_df: pd.DataFrame, feature_names: List[str], config: Dict) -> np.ndarray:
@@ -158,6 +274,12 @@ class OnlinePredictorRuntime:
         timestamp = float(metrics_row.get('timestamp', len(self.buffer) - 1))
         frame_id = int(metrics_row.get('frame_id', len(self.buffer) - 1))
 
+        aligned_history_df = pd.DataFrame(self.buffer[self.window_size - 1:])
+        primary_columns, primary_source = _primary_risk_columns(aligned_history_df)
+        latest_primary = primary_columns.iloc[-1].to_dict() if len(primary_columns) else {}
+        primary_risk = latest_primary.get('primary_risk_score', np.nan)
+        primary_confidence = latest_primary.get('primary_confidence_score', np.nan)
+
         return {
             'timestamp': timestamp,
             'frame_id': frame_id,
@@ -166,8 +288,25 @@ class OnlinePredictorRuntime:
             'predicted_pose_error': pred_error_value,
             'predicted_localization_reliability': (1.0 - failure_prob_value) / (1.0 + pred_error_value),
             'predicted_failure': int(failure_prob_value >= 0.5),
+            'learned_failure_probability': failure_prob_value,
+            'learned_confidence_score': 1.0 - failure_prob_value,
+            'learned_predicted_pose_error': pred_error_value,
+            'learned_predicted_localization_reliability': (1.0 - failure_prob_value) / (1.0 + pred_error_value),
+            'learned_predicted_failure': int(failure_prob_value >= 0.5),
+            'primary_risk_score': float(primary_risk) if pd.notna(primary_risk) else None,
+            'primary_confidence_score': float(primary_confidence) if pd.notna(primary_confidence) else None,
+            'primary_predicted_failure': int(latest_primary.get('primary_predicted_failure', 0)),
+            'primary_localization_reliability': (
+                float(primary_confidence) / (1.0 + pred_error_value) if pd.notna(primary_confidence) else None
+            ),
+            'primary_risk_source': primary_source,
             'window_size': self.window_size,
             'frames_seen': len(self.buffer),
+            **{
+                key: (float(value) if pd.notna(value) and not isinstance(value, str) else value)
+                for key, value in latest_primary.items()
+                if key.startswith('heuristic_') and key not in {'primary_risk_source'}
+            },
         }
 
 
@@ -225,6 +364,18 @@ def run_inference(
         'predicted_localization_reliability': (1.0 - failure_prob) / (1.0 + pred_error),
     })
     predictions['predicted_failure'] = (predictions['failure_probability'] >= 0.5).astype(int)
+    predictions['learned_failure_probability'] = predictions['failure_probability']
+    predictions['learned_confidence_score'] = predictions['confidence_score']
+    predictions['learned_predicted_pose_error'] = predictions['predicted_pose_error']
+    predictions['learned_predicted_localization_reliability'] = predictions['predicted_localization_reliability']
+    predictions['learned_predicted_failure'] = predictions['predicted_failure']
+
+    primary_columns, primary_source = _primary_risk_columns(aligned_rows)
+    predictions = pd.concat([predictions, primary_columns], axis=1)
+    predictions['primary_localization_reliability'] = (
+        predictions['primary_confidence_score'] / (1.0 + predictions['predicted_pose_error'])
+    )
+    predictions['primary_risk_source'] = primary_source
 
     if pose_errors_path and os.path.exists(pose_errors_path):
         pose_errors = pd.read_csv(pose_errors_path)
@@ -310,9 +461,15 @@ def main():
 
     print(f'Wrote {len(predictions)} predictions to {args.output}')
     print(
-        f"Average confidence={predictions['confidence_score'].mean():.4f}, "
-        f"average failure_probability={predictions['failure_probability'].mean():.4f}"
+        f"Average learned confidence={predictions['confidence_score'].mean():.4f}, "
+        f"average learned failure_probability={predictions['failure_probability'].mean():.4f}"
     )
+    if 'primary_risk_score' in predictions.columns:
+        primary_source = predictions['primary_risk_source'].dropna().iloc[0] if predictions['primary_risk_source'].notna().any() else 'unknown'
+        print(
+            f"Average primary risk={predictions['primary_risk_score'].mean():.4f} "
+            f"(source={primary_source})"
+        )
 
 
 if __name__ == '__main__':
