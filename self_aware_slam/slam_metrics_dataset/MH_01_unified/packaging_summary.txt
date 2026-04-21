@@ -1,4 +1,0 @@
-Packaged unified training sequence
-rows: 364
-pose_error_mean: 3.533206
-output_dir: /Users/kailunwang/Desktop/ossa/self_aware_slam/slam_metrics_dataset/MH_01_unified
