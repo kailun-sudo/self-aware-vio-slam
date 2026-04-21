@@ -43,3 +43,18 @@ self_aware_slam/.claude/
 self_aware_slam/results/train_dataset.pkl
 self_aware_slam/results/train_dataset_v2.pkl
 self_aware_slam_legacy/results/train_dataset.pkl
+self_aware_slam/results/models/*.pt
+self_aware_slam/results/*.json
+self_aware_slam/results/train_dataset_v2_sequence_held_out*.pkl
+self_aware_slam/results/train_dataset_v2_sequence_held_out*_diagnostics/
+self_aware_slam/results/train_dataset_v2_diagnostics/
+self_aware_slam/results/train_dataset_v2_sequence_held_out_diagnostics/
+self_aware_slam/slam_metrics_dataset/MH_*_unified/
+build/
+tmp/
+
+# Local Chinese/internal documentation kept out of the public GitHub repo
+README_交付版.md
+README_教学指南.md
+README_自感知模型详解.md
+README_运行指南.md
